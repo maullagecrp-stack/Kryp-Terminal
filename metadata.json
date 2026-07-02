@@ -1,0 +1,6 @@
+{
+  "name": "Crypto Portfolio & Trading Journal",
+  "description": "Portfólio de alta densidade e Diário de Trades para Criptomoedas com importação de CSV, cotações em tempo real e monitoramento de metas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

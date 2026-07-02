@@ -1,0 +1,386 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-terminal-bg: #09090b; /* Zinc 950 */
+  --color-terminal-panel: #0c0c0e; /* Custom deep trader dark gray */
+  --color-terminal-border: #27272a; /* Zinc 800 */
+  --color-bullish: #22c55e; /* Green 500 */
+  --color-bearish: #ef4444; /* Red 500 */
+  --color-accent-amber: #f59e0b; /* Amber 500 */
+}
+
+/* Custom scrollbar for high-density terminal feel */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+body {
+  background-color: #09090b;
+  color: #e4e4e7;
+  font-family: var(--font-sans);
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.font-mono {
+  font-family: var(--font-mono), monospace;
+}
+
+/* Custom animation classes */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-slow {
+  animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Layout overrides to ensure grid borders align perfectly like a terminal screen */
+input[type="range"]::-webkit-slider-thumb {
+  background: #22c55e;
+  border-radius: 9999px;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+
+/* Hide number input increment/decrement arrows globally */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+input::placeholder {
+  color: #52525b; /* zinc-600 */
+  font-weight: 300;
+}
+
+.input-number {
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.875rem; /* text-sm */
+  background: black;
+  border: 1px solid #3f3f46; /* zinc-700 */
+  border-radius: 0.375rem; /* rounded */
+  padding: 0.5rem 0.75rem; /* px-3 py-2 */
+  color: white;
+  width: 100%; /* flexível — respeita o grid */
+  box-sizing: border-box;
+  max-width: 100%; /* nunca ultrapassa o container */
+  min-width: 0;    /* permite encolher se necessário */
+}
+
+/* Classe ÚNICA para todos os inputs numéricos da página */
+.input-padrao {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;        /* text-xs — igual ao ATIVO */
+  background: black;
+  border: 1px solid #3f3f46; /* zinc-700 */
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.65rem;   /* igual ao ATIVO */
+  color: white;
+  line-height: 1.4;
+}
+
+/* Classe para inputs read-only (apenas COTAÇÃO ATUAL) */
+.input-padrao-readonly {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;        /* text-xs — igual ao ATIVO */
+  background: rgba(255, 255, 255, 0.03); /* fundo mais escuro */
+  border: 1px solid #52525b; /* zinc-600 */
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.65rem;   /* igual ao ATIVO */
+  color: #d4d4d8;            /* zinc-300 */
+  cursor: not-allowed;
+  line-height: 1.4;
+}
+
+/* Classe para selects (MOEDA TAXA, INSTITUIÇÃO) */
+.select-padrao {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;        /* text-xs — igual ao ATIVO */
+  background: black;
+  border: 1px solid #3f3f46;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.65rem;   /* igual ao ATIVO */
+  color: white;
+  line-height: 1.4;
+}
+
+.input-monospace {
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.grid-execucao {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr); /* 6 colunas */
+  gap: 0.75rem; /* gap-3 */
+  align-items: start;
+}
+
+.input-erro {
+  border-color: #ef4444 !important; /* red-500 */
+  box-shadow: 0 0 0 1px #ef4444;
+}
+
+/* Estado neutro - todos os cards com borda cinza */
+.card-neutro {
+  border-color: #3f3f46 !important;
+}
+
+/* Estado LONG - todos os cards com borda verde */
+.card-long {
+  border-color: #22c55e !important;
+}
+
+/* Estado SHORT - todos os cards com borda vermelha */
+.card-short {
+  border-color: #ef4444 !important;
+}
+
+/* Ícones dos cards */
+.icone-card-neutro {
+  color: #a1a1aa;
+}
+.icone-card-long {
+  color: #22c55e;
+}
+.icone-card-short {
+  color: #ef4444;
+}
+
+/* Botão LONG - não selecionado (texto verde, borda verde) */
+.btn-long-neutro {
+  background: transparent;
+  border: 1px solid #22c55e;
+  color: #22c55e;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* Botão LONG - selecionado (fundo verde, texto branco) */
+.btn-long-ativo {
+  background: #22c55e;
+  border: 1px solid #22c55e;
+  color: white;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* Botão SHORT - não selecionado (texto vermelho, borda vermelha) */
+.btn-short-neutro {
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* Botão SHORT - selecionado (fundo vermelho, texto branco) */
+.btn-short-ativo {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: white;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* Botões LONG e SHORT quando o outro está selecionado - ficam neutros */
+.btn-inativo {
+  background: transparent;
+  border: 1px solid #3f3f46;
+  color: #71717a;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* Triângulo de status mais encorpado */
+.status-triangle {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-block;
+  transition: color 0.15s ease;
+}
+
+/* Toggle de 3 estados (SIM/NÃO/PARCIAL) */
+.toggle-tres-estados {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.toggle-tres-estados button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  border-radius: 0.25rem;
+  border: 1px solid #3f3f46;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.toggle-tres-estados button.ativo-sim {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: white;
+}
+
+.toggle-tres-estados button.ativo-nao {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
+.toggle-tres-estados button.ativo-parcial {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: white;
+}
+
+/* Estrelas de avaliação */
+.estrelas-container {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.estrela {
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: #3f3f46;
+  transition: color 0.15s ease;
+}
+
+.estrela.ativa {
+  color: #f59e0b; /* amber-500 */
+}
+
+.estrela:hover {
+  color: #fbbf24; /* amber-400 */
+}
+
+/* Botões de emoção */
+.btn-emocao {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: 0.375rem;
+  border: 1px solid #3f3f46;
+  background: transparent;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-emocao.ativo {
+  border-color: #8b5cf6; /* violet-500 */
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+/* Botão de disciplina */
+.btn-disciplina {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.7rem;
+  border-radius: 0.25rem;
+  border: 1px solid #3f3f46;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-disciplina.ativo-seguiu {
+  background: #22c55e;
+  border-color: #22c55e;
+  color: white;
+}
+
+.btn-disciplina.ativo-desviou {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: white;
+}
+
+.btn-disciplina.ativo-ignorou {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
+/* Modal B.5 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 28rem;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+
