@@ -51,10 +51,15 @@ export default function DashboardView({
   const displayPnlValue = totalPnlValue + (isSimulating ? simulatedActivePnL : 0);
   const displayPnlPercent = totalInvested > 0 ? (displayPnlValue / totalInvested) * 100 : 0;
 
-  // Win Rate computation
-  const closedTrades = trades.filter(t => t.status !== 'Aberto');
-  const winTrades = closedTrades.filter(t => t.status === 'Fechado_Gain');
-  const winRate = closedTrades.length > 0 ? (winTrades.length / closedTrades.length) * 100 : 68.4;
+  // New Step 127 calculation logic supporting both english & portuguese status strings
+  const totalTrades = trades.length;
+  const tradesAbertos = trades.filter(t => (t.status as string) === 'OPEN' || t.status === 'Aberto').length;
+  const tradesFechados = trades.filter(t => (t.status as string) === 'CLOSE' || (t.status as string) === 'WIN' || (t.status as string) === 'LOSS' || t.status === 'Fechado_Gain' || t.status === 'Fechado_Loss').length;
+  const tradesVencedores = trades.filter(t => (t.status as string) === 'WIN' || (t.status as string) === 'Fechado_Gain' || ((((t.status as string) === 'CLOSE' || (t.status as string) === 'Fechado_Gain') && (Number((t as any).pnl) > 0 || t.pnl_realizado > 0)))).length;
+
+  const winRate = tradesFechados > 0 ? ((tradesVencedores / tradesFechados) * 100).toFixed(1) : "0";
+  const pnlTotal = trades.reduce((acc, curr) => acc + (Number((curr as any).pnl) || Number(curr.pnl_realizado) || 0), 0);
+  const capitalExposto = trades.filter(t => (t.status as string) === 'OPEN' || t.status === 'Aberto').reduce((acc, curr) => acc + (Number((curr as any).valorTotal) || (curr.preco_compra * curr.quantidade) || 0), 0);
 
   // Allocation metrics
   const coinAllocations: { [key: string]: number } = {};
@@ -86,72 +91,57 @@ export default function DashboardView({
     <div className="space-y-6 font-mono text-zinc-300 select-none">
       
       {/* 4 Cards de Métricas Principais (Visão Macro) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 bg-[#09090b] p-1 border border-zinc-900 rounded-lg shrink-0">
-        
-        {/* Net Worth */}
-        <div className="p-4 bg-[#0c0c0e]/95 border border-zinc-800/80 rounded-md relative overflow-hidden group">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider flex items-center gap-1.5">
-              TOTAL NET WORTH
-              {isSimulating && (
-                <span className="text-[8px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-1 py-0.2 rounded font-extrabold animate-pulse">
-                  SIMULADO
-                </span>
-              )}
-            </span>
-            <DollarSign className="w-3.5 h-3.5 text-zinc-500" />
+      <div className="mb-6 animate-fade-in">
+        <h2 className="text-2xl font-bold text-white">Dashboard Geral</h2>
+        <p className="text-zinc-400 text-sm">Visão consolidada da sua carteira e performance.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* Card 1: PNL Total */}
+        <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider">PNL Total</span>
+            <span className="text-zinc-600">💰</span>
           </div>
-          <h2 className="text-lg md:text-xl font-black text-zinc-50 tracking-tight">
-            $ {displayNetWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </h2>
-          <p className="text-[9px] text-green-400 mt-1 flex items-center gap-1 font-mono">
-            <span>▲</span>
-            <span>Em Aberto: $ {(totalCurrentValue + (isSimulating ? simulatedActivePnL : 0)).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+          <p className={`text-2xl font-mono font-bold ${pnlTotal >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            {pnlTotal >= 0 ? '+' : '-'}$ {Math.abs(pnlTotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
 
-        {/* Invested Capital */}
-        <div className="p-4 bg-[#0c0c0e]/95 border border-zinc-800/80 rounded-md">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">INVESTED CAPITAL</span>
-            <Layers className="w-3.5 h-3.5 text-zinc-500" />
+        {/* Card 2: Win Rate */}
+        <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider">Win Rate</span>
+            <span className="text-zinc-600">🎯</span>
           </div>
-          <h2 className="text-lg md:text-xl font-black text-zinc-50 tracking-tight">
-            $ {totalInvested.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </h2>
-          <p className="text-[9px] text-zinc-400 mt-1">
-            {trades.filter(t => t.status === 'Aberto').length} Posições Ativas
-          </p>
-        </div>
-
-        {/* Total PNL */}
-        <div className="p-4 bg-[#111115]/50 border border-zinc-800/80 rounded-md">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">TOTAL PNL</span>
-            <TrendingUp className="w-3.5 h-3.5 text-zinc-500" />
-          </div>
-          <h2 className={`text-lg md:text-xl font-black tracking-tight ${displayPnlValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-            {displayPnlValue >= 0 ? '+' : ''}$ {displayPnlValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </h2>
-          <p className={`text-[9px] mt-1 ${displayPnlValue >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            Acumulado: {displayPnlPercent.toFixed(2)}%
-          </p>
-        </div>
-
-        {/* Win Rate */}
-        <div className="p-4 bg-[#0c0c0e]/95 border border-zinc-800/80 rounded-md">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">WIN RATE (TAXA)</span>
-            <FileCheck2 className="w-3.5 h-3.5 text-zinc-500" />
-          </div>
-          <h2 className="text-lg md:text-xl font-black text-zinc-50 tracking-tight">
-            {winRate.toFixed(1)}%
-          </h2>
-          <div className="w-full h-1 bg-zinc-800 rounded mt-2.5 overflow-hidden">
-            <div className="h-full bg-green-500" style={{ width: `${winRate}%` }}></div>
+          <div className="flex items-end gap-2">
+            <p className="text-2xl font-mono font-bold text-white">{winRate}%</p>
+            <p className="text-xs text-zinc-500 mb-1 pb-0.5">{tradesVencedores}W / {tradesFechados - tradesVencedores}L</p>
           </div>
         </div>
 
+        {/* Card 3: Capital Exposto */}
+        <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider">Capital Exposto</span>
+            <span className="text-zinc-600">🛡️</span>
+          </div>
+          <div className="flex items-end gap-2">
+            <p className="text-2xl font-mono font-bold text-blue-400">
+              $ {capitalExposto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-xs text-zinc-500 mb-1 pb-0.5 font-mono">em {tradesAbertos} ativos</p>
+          </div>
+        </div>
+
+        {/* Card 4: Volume de Operações */}
+        <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider">Total de Trades</span>
+            <span className="text-zinc-600">📊</span>
+          </div>
+          <p className="text-2xl font-mono font-bold text-white">{totalTrades}</p>
+        </div>
       </div>
 
       {/* Mid Charts Display */}

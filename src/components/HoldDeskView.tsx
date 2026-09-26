@@ -13,13 +13,14 @@ import {
   DollarSign,
   Upload
 } from 'lucide-react';
-import { Hold, CoinPrice, Instituicao } from '../types';
+import { Hold, CoinPrice, Instituicao, BrokerAccount } from '../types';
 
 interface HoldDeskViewProps {
   holds: Hold[];
   setHolds: React.Dispatch<React.SetStateAction<Hold[]>>;
   coinPrices: CoinPrice[];
   institutions: Instituicao[];
+  brokerAccounts?: BrokerAccount[];
   onLaunchHoldClick: () => void;
   showNotification: (message: string, type?: 'success' | 'info' | 'error') => void;
 }
@@ -29,6 +30,7 @@ export default function HoldDeskView({
   setHolds,
   coinPrices,
   institutions,
+  brokerAccounts = [],
   onLaunchHoldClick,
   showNotification
 }: HoldDeskViewProps) {
@@ -520,7 +522,15 @@ export default function HoldDeskView({
                   return (
                     <tr key={h.id} className="border-b border-zinc-900 bg-black/5 hover:bg-zinc-900/10 transition-all text-[11px]">
                       <td className="p-3 text-zinc-400">{new Date(h.data_hora).toLocaleString('pt-BR')}</td>
-                      <td className="p-3 text-zinc-300 font-semibold">{h.exchange}</td>
+                      <td className="p-3 text-zinc-300 font-semibold">
+                        <div>{h.exchange}</div>
+                        {h.conta_corretora_nome && (
+                          <div className="text-[9px] text-green-400 font-mono tracking-tight flex items-center gap-1 mt-0.5" title={h.conta_corretora_nome}>
+                            <span className="w-1 h-1 rounded-full bg-green-500 shrink-0"></span>
+                            {h.conta_corretora_nome}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-3 text-white font-bold">{h.moeda}</td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${

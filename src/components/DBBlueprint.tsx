@@ -33,7 +33,30 @@ CREATE POLICY "Instituições são visíveis para todos os autenticados" ON publ
 CREATE POLICY "Usuários podem criar e gerenciar as próprias instituições" ON public.instituicoes
     FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
--- 4. Tabela Principal de Trades (Atualizada com Integridade Referencial)
+-- 4. Tabela de Contas de Corretoras (Multi-Contas por Corretora via API)
+CREATE TABLE public.broker_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    broker VARCHAR(100) NOT NULL, -- ex: 'Binance', 'Bybit', 'OKX'
+    nome_conta VARCHAR(150) NOT NULL, -- ex: 'Binance Spot Principal', 'Subconta 02 Futuros'
+    tipo_mercado VARCHAR(50) NOT NULL DEFAULT 'Spot', -- 'Spot', 'Futuros', 'Ambos'
+    ambiente VARCHAR(50) NOT NULL DEFAULT 'Mainnet', -- 'Mainnet', 'Testnet'
+    status VARCHAR(50) NOT NULL DEFAULT 'Conectado',
+    saldo_total_usd NUMERIC(20, 4) NOT NULL DEFAULT 0,
+    saldo_disponivel_usd NUMERIC(20, 4) NOT NULL DEFAULT 0,
+    cor_hex VARCHAR(7) NOT NULL DEFAULT '#22c55e',
+    ativo BOOLEAN NOT NULL DEFAULT true,
+    ultimo_sync TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    UNIQUE(user_id, broker, nome_conta)
+);
+
+ALTER TABLE public.broker_accounts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Usuários gerenciam suas próprias contas de corretoras" ON public.broker_accounts
+    FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- 5. Tabela Principal de Trades (Atualizada com Integridade Referencial e Multi-Contas)
 CREATE TABLE public.trades (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, -- Integração direta com Supabase Auth

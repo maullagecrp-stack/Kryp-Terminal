@@ -11,6 +11,46 @@ export interface Instituicao {
   native_coin?: string;
 }
 
+export type BrokerName = 
+  | 'Binance' 
+  | 'Bybit' 
+  | 'OKX' 
+  | 'Mexc' 
+  | 'Bitget' 
+  | 'Gate.io' 
+  | 'Kraken' 
+  | 'KuCoin' 
+  | 'Coinbase'
+  | 'Outra';
+
+export interface BrokerAssetBalance {
+  asset: string;
+  free: number;
+  locked: number;
+  total: number;
+  usdValue: number;
+}
+
+export interface BrokerAccount {
+  id: string;
+  broker: string; // Ex: Binance, Bybit, OKX, etc.
+  nome_conta: string; // Ex: "Binance - Conta Principal", "Binance - Futuros", "Subconta 02"
+  tipo_mercado: 'Spot' | 'Futuros' | 'Ambos';
+  ambiente: 'Mainnet' | 'Testnet';
+  api_key: string;
+  api_secret: string;
+  passphrase?: string; // Para corretoras como OKX, KuCoin, Bitget
+  status: 'Conectado' | 'Erro' | 'Pendente' | 'Desconectado';
+  status_mensagem?: string;
+  ultimo_sync?: string;
+  saldo_total_usd: number;
+  saldo_disponivel_usd: number;
+  balances?: BrokerAssetBalance[];
+  cor_hex: string;
+  ativo: boolean;
+  created_at: string;
+}
+
 export interface Trade {
   id: string;
   data_hora: string;
@@ -28,11 +68,15 @@ export interface Trade {
   alvo_6: number | null;
   status: TradeStatus;
   pnl_realizado: number;
+  quantidade_restante?: number;
   tipo_operacao?: 'Long' | 'Short';
   estrategia?: string;
   notas?: string;
   moeda_taxa?: string;
   quantidade_taxa?: number;
+  trackPosicao?: number;
+  conta_corretora_id?: string;
+  conta_corretora_nome?: string;
 }
 
 export interface CoinPrice {
@@ -56,4 +100,6 @@ export interface Hold {
   alvo_3?: number | null;
   notas?: string;
   created_at?: string;
+  conta_corretora_id?: string;
+  conta_corretora_nome?: string;
 }

@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+} from 'recharts';
+import { 
   Plus, 
   Trash2, 
   Search, 
@@ -9,10 +12,10 @@ import {
   Calendar,
   Layers,
   ArrowUpRight,
-  Pencil
+  Pencil,
+  Link2
 } from 'lucide-react';
-import { Trade, CoinPrice, TradeStatus, Instituicao } from '../types';
-import MarketSimulator from './MarketSimulator';
+import { Trade, CoinPrice, TradeStatus, Instituicao, BrokerAccount } from '../types';
 
 const calcTargetPnlPercent = (entryPrice: number, targetVal: number, tipo?: 'Long' | 'Short') => {
   if (!entryPrice || !targetVal) return '';
@@ -132,6 +135,124 @@ const formatPreciso = (value: number | string | null | undefined, decimals = 9) 
   return num.toFixed(decimals);
 };
 
+const classificarTempoTrade = (dataEntrada: string, dataSaida: string) => {
+  const entrada = new Date(dataEntrada).getTime();
+  const saida = new Date(dataSaida).getTime();
+  const diffEmHoras = Math.abs(saida - entrada) / 36e5; // 36e5 = milissegundos em 1 hora
+
+  if (diffEmHoras <= 4) return 'SCALPING';
+  if (diffEmHoras <= 48) return 'DAY_TRADE';
+  if (diffEmHoras <= 720) return 'SWING_TRADE'; // 30 dias * 24h
+  return 'POSITION';
+};
+
+function getLogoUrl(ticker: string): string {
+  const mapaLogos: Record<string, string> = {
+    'BTC': 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
+    'ETH': 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
+    'SOL': 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
+    'XRP': 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png',
+    'AVAX': 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png',
+    'LINK': 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png',
+    'DOGE': 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png',
+    'ADA': 'https://assets.coingecko.com/coins/images/975/large/cardano.png',
+    'MATIC': 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png',
+    'XVS': 'https://assets.coingecko.com/coins/images/11867/large/Venus-logo.png',
+    'ICP': 'https://assets.coingecko.com/coins/images/14495/large/Infinity.png',
+    'BNB': 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png',
+  };
+  return mapaLogos[ticker] || `https://cryptoicons.org/api/icon/${ticker.toLowerCase()}/32`;
+}
+
+interface PositionTrackItem {
+  label: string;
+  preco: number;
+  tipo: 'stop' | 'entrada' | 'alvo';
+}
+
+function calcularPosicoesTrack(trade: any): { posicoes: PositionTrackItem[]; posicaoTriangulo: number } {
+  const compra = Number(trade.compra) || 0;
+  const stopLoss = Number(trade.stopLoss) || 0;
+  const cotacao = Number(trade.cotacao) || compra;
+  const alvo1 = Number(trade.alvo1) || 0;
+  const alvo2 = Number(trade.alvo2) || 0;
+  const alvo3 = Number(trade.alvo3) || 0;
+  const direcao = trade.direcao || 'LONG';
+
+  const distanciaStop = Math.abs(compra - stopLoss);
+
+  let s1, s2, s3;
+  if (direcao === 'LONG') {
+    s1 = compra - (distanciaStop * 0.30);
+    s2 = compra - (distanciaStop * 0.70);
+    s3 = stopLoss;
+  } else {
+    s1 = compra + (distanciaStop * 0.30);
+    s2 = compra + (distanciaStop * 0.70);
+    s3 = stopLoss;
+  }
+
+  let posicoes: PositionTrackItem[];
+  if (direcao === 'LONG') {
+    posicoes = [
+      { label: 'S3', preco: s3, tipo: 'stop' },
+      { label: 'S2', preco: s2, tipo: 'stop' },
+      { label: 'S1', preco: s1, tipo: 'stop' },
+      { label: 'E', preco: compra, tipo: 'entrada' },
+      { label: 'A1', preco: alvo1, tipo: 'alvo' },
+      { label: 'A2', preco: alvo2, tipo: 'alvo' },
+      { label: 'A3', preco: alvo3, tipo: 'alvo' },
+    ];
+  } else {
+    posicoes = [
+      { label: 'A3', preco: alvo3, tipo: 'alvo' },
+      { label: 'A2', preco: alvo2, tipo: 'alvo' },
+      { label: 'A1', preco: alvo1, tipo: 'alvo' },
+      { label: 'E', preco: compra, tipo: 'entrada' },
+      { label: 'S1', preco: s1, tipo: 'stop' },
+      { label: 'S2', preco: s2, tipo: 'stop' },
+      { label: 'S3', preco: s3, tipo: 'stop' },
+    ];
+  }
+
+  let posicaoTriangulo = 3;
+  let menorDistancia = Infinity;
+
+  posicoes.forEach((pos, index) => {
+    if (pos.preco > 0) {
+      const dist = Math.abs(cotacao - pos.preco);
+      if (dist < menorDistancia) {
+        menorDistancia = dist;
+        posicaoTriangulo = index;
+      }
+    }
+  });
+
+  if (trade.status !== 'OPEN' && trade.trackPosicao !== undefined) {
+    posicaoTriangulo = trade.trackPosicao;
+  }
+
+  return { posicoes, posicaoTriangulo };
+}
+
+function corTriangulo(posicaoTriangulo: number, status: string, direcao: 'LONG' | 'SHORT'): string {
+  if (status === 'WIN') return 'text-green-400';
+  if (status === 'LOSS') return 'text-red-400';
+  if (status === 'CLOSE') return 'text-zinc-500';
+
+  if (direcao === 'LONG') {
+    if (posicaoTriangulo <= 1) return 'text-red-400';
+    if (posicaoTriangulo === 2) return 'text-yellow-400';
+    if (posicaoTriangulo === 3) return 'text-blue-400';
+    return 'text-green-400';
+  } else {
+    if (posicaoTriangulo <= 2) return 'text-green-400';
+    if (posicaoTriangulo === 3) return 'text-blue-400';
+    if (posicaoTriangulo === 4) return 'text-yellow-400';
+    return 'text-red-400';
+  }
+}
+
 interface TradeDeskViewProps {
   trades: Trade[];
   setTrades: React.Dispatch<React.SetStateAction<Trade[]>>;
@@ -149,6 +270,11 @@ interface TradeDeskViewProps {
   setSimulatedActivePnL: React.Dispatch<React.SetStateAction<number>>;
   downloadCsvTemplate: () => void;
   onLaunchTradeClick: () => void;
+  saldoBanca: number;
+  setSaldoBanca: React.Dispatch<React.SetStateAction<number>>;
+  brokerAccounts?: BrokerAccount[];
+  onNavigateToBrokerConnections?: () => void;
+  onResetAllData?: () => void;
 }
 
 export default function TradeDeskView({
@@ -167,13 +293,130 @@ export default function TradeDeskView({
   simulatedActivePnL,
   setSimulatedActivePnL,
   downloadCsvTemplate,
-  onLaunchTradeClick
+  onLaunchTradeClick,
+  saldoBanca,
+  setSaldoBanca,
+  brokerAccounts = [],
+  onNavigateToBrokerConnections,
+  onResetAllData,
 }: TradeDeskViewProps) {
   
+  // Filtra apenas os trades que já foram encerrados (Fechado_Gain ou Fechado_Loss)
+  const tradesFechados = trades.filter(t => t.status === 'Fechado_Gain' || t.status === 'Fechado_Loss');
+
+  // 1. Win Rate
+  const totalFechados = tradesFechados.length;
+  const totalWins = tradesFechados.filter(t => t.status === 'Fechado_Gain').length;
+  const winRate = totalFechados > 0 ? (totalWins / totalFechados) * 100 : 0;
+
+  // 2. PNL Total e Fator de Lucro (Profit Factor)
+  let grossProfit = 0;
+  let grossLoss = 0;
+
+  // Agrupamento para descobrir o melhor ativo
+  const pnlPorAtivo: Record<string, number> = {};
+
+  tradesFechados.forEach(t => {
+    const pnl = t.pnl_realizado;
+    const ativo = t.moeda;
+
+    // Soma PNL
+    if (pnl > 0) grossProfit += pnl;
+    else grossLoss += Math.abs(pnl);
+
+    // Agrupa por ativo
+    if (ativo) {
+      const uppercaseAtivo = ativo.toUpperCase();
+      if (!pnlPorAtivo[uppercaseAtivo]) pnlPorAtivo[uppercaseAtivo] = 0;
+      pnlPorAtivo[uppercaseAtivo] += pnl;
+    }
+  });
+
+  const pnlTotal = grossProfit - grossLoss;
+  const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? 99.99 : 0);
+
+  // 3. Melhor Ativo (o que tem o maior PNL acumulado)
+  const melhorAtivo = Object.keys(pnlPorAtivo).length > 0 
+    ? Object.keys(pnlPorAtivo).reduce((a, b) => pnlPorAtivo[a] > pnlPorAtivo[b] ? a : b) 
+    : '—';
+
+  // ─── PREPARAÇÃO DOS DADOS DO GRÁFICO (V2 - COM FILTROS) ───
+
+  // Filter states
+  const [filtroGrafico, setFiltroGrafico] = useState('TODOS');
+
+  // 1. Extrair lista de ativos únicos para os botões de filtro
+  const ativosUnicos = ['TODOS', ...new Set(tradesFechados.map(t => t.moeda?.toUpperCase()).filter(Boolean))];
+
+  // 2. Filtrar os trades de acordo com a seleção
+  const tradesParaGrafico = filtroGrafico === 'TODOS' 
+    ? [...tradesFechados].sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime())
+    : [...tradesFechados].filter(t => t.moeda?.toUpperCase() === filtroGrafico).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
+
+  // 3. Descobrir o Melhor e Pior Trade deste filtro
+  let melhorTrade: any = null;
+  let piorTrade: any = null;
+
+  if (tradesParaGrafico.length > 0) {
+    melhorTrade = tradesParaGrafico.reduce((max, t) => t.pnl_realizado > max.pnl_realizado ? t : max, tradesParaGrafico[0]);
+    piorTrade = tradesParaGrafico.reduce((min, t) => t.pnl_realizado < min.pnl_realizado ? t : min, tradesParaGrafico[0]);
+  }
+
+  // 4. Montar os dados para o Recharts
+  const bancaInicial = saldoBanca - pnlTotal; 
+  // Se for TODOS, mostra a banca real. Se for um ativo, começa do 0 para ver o PNL isolado.
+  let saldoAcumulado = filtroGrafico === 'TODOS' ? bancaInicial : 0; 
+
+  const dadosGrafico = [{
+    nome: 'Início',
+    pnlDesteTrade: 0,
+    ativo: '',
+    equity: saldoAcumulado
+  }];
+
+  tradesParaGrafico.forEach((t, index) => {
+    saldoAcumulado += t.pnl_realizado;
+    dadosGrafico.push({
+      nome: `Trade ${index + 1}`,
+      ativo: t.moeda,
+      pnlDesteTrade: t.pnl_realizado,
+      equity: saldoAcumulado
+    });
+  });
+
   // Filter states
   const [tickerFilter, setTickerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<TradeStatus | 'Todos'>('Todos');
+  const [filtroConta, setFiltroConta] = useState<string>('Todas');
   const [showAddForm, setShowAddForm] = useState(false);
+
+  // Modal Encerramento State
+  const [modalEncerramento, setModalEncerramento] = useState<{
+    isOpen: boolean;
+    trade: any;
+    cotacaoSaida: string;
+    dataSaida: string;
+    tipoSaida: 'TOTAL' | 'PARCIAL';
+    quantidadeSaida: string | number;
+  }>({
+    isOpen: false,
+    trade: null, // Objeto do trade sendo encerrado
+    cotacaoSaida: '',
+    dataSaida: new Date().toISOString().slice(0, 16), // Formato YYYY-MM-DDTHH:mm
+    tipoSaida: 'TOTAL', // 'TOTAL' ou 'PARCIAL'
+    quantidadeSaida: '', // Quantidade que está sendo vendida/comprada agora
+  });
+
+  // Modal Detalhes (Raio-X) State
+  const [modalDetalhes, setModalDetalhes] = useState<{
+    isOpen: boolean;
+    trade: any;
+    abaAtiva: 'RESUMO' | 'DIARIO' | 'EXECUCAO';
+  }>({
+    isOpen: false,
+    trade: null,
+    abaAtiva: 'RESUMO'
+  });
 
   // Form states matching original manual entry
   const [formData, setFormData] = useState({
@@ -192,32 +435,35 @@ export default function TradeDeskView({
   });
 
   // Share and lift simulator states
-  const [variations, setVariations] = useState<Record<string, number>>({});
-  const [simulatedPrices, setSimulatedPrices] = useState<Record<string, number>>({});
+  const [ativoSimulador, setAtivoSimulador] = useState<string | null>(null);
+
+  // Extrair apenas os ativos únicos que possuem trades com status 'Aberto'
+  const ativosAbertosSimulador = [...new Set(trades.filter(t => t.status === 'Aberto').map(t => t.moeda?.toUpperCase()).filter(Boolean))];
 
   const activeTrades = trades.filter(t => t.status === 'Aberto');
   const uniqueTickers = Array.from(new Set(activeTrades.map(t => t.moeda.toUpperCase()))).sort();
 
-  // Keep variations state clean and matched to active positions
-  useEffect(() => {
-    setVariations(prev => {
-      const nextVariations = { ...prev };
-      let updated = false;
-      uniqueTickers.forEach(ticker => {
-        if (nextVariations[ticker] === undefined) {
-          nextVariations[ticker] = 0;
-          updated = true;
-        }
-      });
-      Object.keys(nextVariations).forEach(ticker => {
-        if (!uniqueTickers.includes(ticker)) {
-          delete nextVariations[ticker];
-          updated = true;
-        }
-      });
-      return updated ? nextVariations : prev;
-    });
-  }, [trades]);
+  const handleSelectAtivo = (ativo: string | null) => {
+    setAtivoSimulador(ativo);
+  };
+
+  // Calcula o PNL em tempo real no modal
+  let pnlPreview = 0;
+  let isWin = false;
+
+  if (modalEncerramento.trade && modalEncerramento.cotacaoSaida && modalEncerramento.quantidadeSaida) {
+    const entrada = parseFloat(modalEncerramento.trade.cotacaoCompra) || 0;
+    const saida = parseFloat(modalEncerramento.cotacaoSaida) || 0;
+    const qtdSaindo = parseFloat(modalEncerramento.quantidadeSaida.toString()) || 0;
+    
+    if (modalEncerramento.trade.direcao === 'LONG') {
+      pnlPreview = (saida - entrada) * qtdSaindo;
+    } else { // SHORT
+      pnlPreview = (entrada - saida) * qtdSaindo;
+    }
+    
+    isWin = pnlPreview > 0;
+  }
 
   // Handle adding new trade from inline compact form
   const handleAddNewTrade = (e: React.FormEvent) => {
@@ -305,20 +551,17 @@ export default function TradeDeskView({
   const filteredTrades = trades.filter(t => {
     const matchesTicker = t.moeda.toLowerCase().includes(tickerFilter.toLowerCase());
     const matchesStatus = statusFilter === 'Todos' ? true : t.status === statusFilter;
-    return matchesTicker && matchesStatus;
+    const matchesConta = filtroConta === 'Todas'
+      ? true
+      : (t.conta_corretora_nome === filtroConta || t.exchange === filtroConta);
+    return matchesTicker && matchesStatus && matchesConta;
   });
 
-  // Handle simulation updates
-  const handleSimulationChange = (simPnL: number, simPrices: Record<string, number>) => {
-    setSimulatedActivePnL(simPnL);
-    setSimulatedPrices(simPrices);
-    const activeOpenTrades = trades.filter(t => t.status === 'Aberto');
-    const hasActiveSimulation = Object.keys(simPrices).some(ticker => {
-      const matchingTrade = activeOpenTrades.find(t => t.moeda.toUpperCase() === ticker);
-      return matchingTrade && simPrices[ticker] !== matchingTrade.preco_compra;
-    });
-    setIsSimulating(hasActiveSimulation);
-  };
+  // Efeito para manter a simulação desativada por padrão ou quando não há simulação baseada em sliders
+  useEffect(() => {
+    setSimulatedActivePnL(0);
+    setIsSimulating(false);
+  }, [setSimulatedActivePnL, setIsSimulating]);
 
   // Export current filtered trades to CSV
   const handleExportCSV = () => {
@@ -350,9 +593,7 @@ export default function TradeDeskView({
     const rows = filteredTrades.map(trade => {
       const coinPriceObj = coinPrices.find(c => c.moeda.toUpperCase() === trade.moeda.toUpperCase());
       const livePrice = coinPriceObj ? coinPriceObj.current_price : trade.preco_compra;
-      const currentPrice = (isSimulating && simulatedPrices[trade.moeda.toUpperCase()] !== undefined)
-        ? simulatedPrices[trade.moeda.toUpperCase()]
-        : livePrice;
+      const currentPrice = livePrice;
 
       const isAberto = trade.status === 'Aberto';
       let pnlValue = 0;
@@ -455,8 +696,103 @@ export default function TradeDeskView({
             <Download className="w-3.5 h-3.5 text-zinc-500" />
             OBTER TEMPLATE
           </button>
+
+          {onNavigateToBrokerConnections && (
+            <button
+              onClick={onNavigateToBrokerConnections}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-white font-bold rounded text-[10px] transition-all cursor-pointer shadow"
+              title="Gerenciar conexões de API com corretoras"
+            >
+              <Link2 className="w-3.5 h-3.5 text-green-400" />
+              CONEXÕES API ({brokerAccounts.length})
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Display do Saldo da Banca */}
+      <div className="flex justify-between items-center bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🏦</span>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-zinc-550 uppercase font-bold tracking-wider leading-none">
+              Saldo da Conta (Bankroll Global)
+            </span>
+            <span className="text-[9px] text-zinc-500 uppercase mt-0.5 font-semibold">Impacto cumulativo de suas operações finalizadas</span>
+          </div>
+        </div>
+        <span className="text-lg font-mono font-bold text-zinc-100">
+          $ {saldoBanca.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      </div>
+
+      {/* ─── DASHBOARD DE ESTATÍSTICAS ─── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        {/* Card 1: Win Rate */}
+        <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-4 rounded-xl flex flex-col justify-between shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Win Rate</span>
+            <span className="text-lg">🎯</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-mono font-bold ${winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+              {winRate.toFixed(1)}%
+            </span>
+            <span className="text-xs text-zinc-500 font-mono">
+              ({totalWins}/{totalFechados})
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: PNL Total */}
+        <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-4 rounded-xl flex flex-col justify-between shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">PNL Total</span>
+            <span className="text-lg">💰</span>
+          </div>
+          <span className={`text-2xl font-mono font-bold ${pnlTotal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {pnlTotal >= 0 ? '+' : '-'}$ {Math.abs(pnlTotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+
+        {/* Card 3: Profit Factor */}
+        <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-4 rounded-xl flex flex-col justify-between shadow-sm relative group cursor-help">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Profit Factor</span>
+            <span className="text-lg">⚖️</span>
+          </div>
+          <span className={`text-2xl font-mono font-bold ${profitFactor >= 1.5 ? 'text-green-400' : profitFactor >= 1 ? 'text-amber-400' : 'text-red-400'}`}>
+            {profitFactor.toFixed(2)}x
+          </span>
+          
+          {/* Tooltip explicativo (aparece no hover) */}
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-zinc-800 border border-zinc-700 rounded text-[10px] text-zinc-300 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-xl">
+            Média de Ganhos dividida pela Média de Perdas. Acima de 1.5x é excelente.
+          </div>
+        </div>
+
+        {/* Card 4: Melhor Ativo */}
+        <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-4 rounded-xl flex flex-col justify-between shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Melhor Ativo</span>
+            <span className="text-lg">🏆</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-violet-400">
+              {melhorAtivo}
+            </span>
+            {melhorAtivo !== '—' && (
+              <span className="text-xs text-green-400 font-mono">
+                +$ {pnlPorAtivo[melhorAtivo]?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+
 
       {/* 1. Tabela "Ativos e Metas" (100% de largura) */}
       <div className="w-full bg-[#0c0c0e]/80 border border-zinc-800 rounded-lg p-5">
@@ -490,6 +826,40 @@ export default function TradeDeskView({
               <option value="Fechado_Gain">Sucesso: Gain</option>
               <option value="Fechado_Loss">Fracasso: Loss</option>
             </select>
+
+            {brokerAccounts && brokerAccounts.length > 0 && (
+              <select
+                value={filtroConta}
+                onChange={(e) => setFiltroConta(e.target.value)}
+                className="bg-[#09090b] border border-zinc-850 text-[10px] font-mono rounded p-1 text-zinc-300 focus:outline-none focus:border-green-500 cursor-pointer max-w-[140px] truncate"
+                title="Filtrar por conta específica da corretora"
+              >
+                <option value="Todas">Conta: Todas</option>
+                {brokerAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.nome_conta}>
+                    {acc.broker}: {acc.nome_conta}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <button 
+              onClick={() => {
+                if (onResetAllData) {
+                  onResetAllData();
+                } else {
+                  setTrades([]);
+                  if (typeof window !== 'undefined') {
+                    localStorage.removeItem('@kryp-terminal:trades');
+                  }
+                  showNotification('Trades zerados com sucesso!', 'info');
+                }
+              }}
+              className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/30 px-2 py-1 rounded hover:bg-red-500/20 transition-colors ml-2 cursor-pointer font-bold"
+              title="Apaga os dados e zera o terminal para iniciar lançamentos reais"
+            >
+              Zerar Dados
+            </button>
           </div>
         </div>
 
@@ -523,56 +893,29 @@ export default function TradeDeskView({
         </div>
 
         {/* Scrollable table container with maximum height [60vh] and vertical internal scroll */}
-        <div className="max-h-[60vh] overflow-y-auto border border-zinc-900/65 rounded bg-[#09090b]/55">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left font-mono text-[11px] border-collapse relative">
-              <thead className="sticky top-0 bg-[#070709] z-10 border-b border-zinc-900 text-zinc-500 text-[9px] uppercase">
-                <tr>
-                  <th className="w-[95px] py-4 pl-2 pr-1 text-[10px] bg-[#070709] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-data">
-                    DATA
-                  </th>
-                  <th key="status" className="w-[36px] py-4 px-0 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-center col-st">
-                    ST
-                  </th>
-                  <th className="w-[90px] py-4 pl-1 pr-2 text-[10px] bg-[#070709] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-ticker">
-                    TICKER
-                  </th>
-                  <th className="w-[130px] py-4 px-2 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-inst">
-                    INSTITUIÇÃO
-                  </th>
-                  <th className="w-[130px] py-4 px-2 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-compra">
-                    COMPRA
-                  </th>
-                  <th className="w-[120px] py-4 px-2 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-qtd">
-                    VALOR TOTAL
-                  </th>
-                  <th className="w-[130px] py-4 px-3 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-pnl">
-                    PNL
-                  </th>
-                  <th className="w-[130px] py-4 px-2 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center">
-                    STOP LOSS
-                  </th>
-                  <th key="track" className="py-4 px-1 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-track">
-                    TRACK
-                  </th>
-                  <th className="w-[120px] py-4 px-2 text-[10px] bg-[#070709] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center">
-                    ALVO FINAL
-                  </th>
-                  <th key="opcoes" className="w-[110px] py-4 px-2 bg-[#070709] text-[10px] font-bold text-zinc-500 uppercase tracking-wider whitespace-nowrap text-center col-opcoes">
-                    OPÇÕES
-                  </th>
-                </tr>
-              </thead>
+        <div className="overflow-auto border border-zinc-900/65 rounded bg-[#09090b]/55" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+          <table className="w-full text-left font-mono text-[11px] border-collapse relative">
+            <thead className="sticky top-0 z-10 bg-[#0a0a0a]">
+              <tr>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-data bg-[#0a0a0a]">DATA</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-ticker bg-[#0a0a0a]">TICKER</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-compra bg-[#0a0a0a]">COMPRA</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-qtd bg-[#0a0a0a]">VALOR TOTAL</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-pnl bg-[#0a0a0a]">PNL</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left bg-[#0a0a0a]">STOP LOSS</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left min-w-[280px] col-track bg-[#0a0a0a]">TRACK</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left bg-[#0a0a0a]">ALVO FINAL</th>
+                <th className="px-2 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left bg-[#0a0a0a]">INSTITUIÇÃO</th>
+                <th className="px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider text-left col-opcoes bg-[#0a0a0a]">OPÇÕES</th>
+              </tr>
+            </thead>
               <tbody className="divide-y divide-zinc-900">
                 {filteredTrades.length > 0 ? (
                   filteredTrades.map((originalTrade, index) => {
                     const coinPriceObj = coinPrices.find(c => c.moeda.toUpperCase() === originalTrade.moeda.toUpperCase());
                     const livePrice = coinPriceObj ? coinPriceObj.current_price : originalTrade.preco_compra;
                     
-                    // Use simulated price of this asset if active and available
-                    const currentPrice = (isSimulating && simulatedPrices[originalTrade.moeda.toUpperCase()] !== undefined)
-                      ? simulatedPrices[originalTrade.moeda.toUpperCase()]
-                      : livePrice;
+                    const currentPrice = livePrice;
 
                     const isAberto = originalTrade.status === 'Aberto';
                     
@@ -591,10 +934,16 @@ export default function TradeDeskView({
                     const trade = {
                       id: originalTrade.id,
                       ticker: originalTrade.moeda,
+                      ativo: originalTrade.moeda,
+                      dataEntrada: originalTrade.data_hora,
+                      cotacaoCompra: originalTrade.preco_compra,
+                      compra: originalTrade.preco_compra,
+                      quantidade: originalTrade.quantidade,
                       date: originalTrade.data_hora.includes('T')
                         ? new Date(originalTrade.data_hora).toLocaleDateString('pt-BR')
                         : originalTrade.data_hora,
                       institution: originalTrade.exchange,
+                      instituicao: originalTrade.exchange,
                       buyPrice: originalTrade.preco_compra,
                       quantity: originalTrade.quantidade,
                       stopLoss: originalTrade.stop_loss || 0,
@@ -606,6 +955,10 @@ export default function TradeDeskView({
                         originalTrade.alvo_5,
                         originalTrade.alvo_6
                       ],
+                      alvo1: originalTrade.alvo_1 || 0,
+                      alvo2: originalTrade.alvo_2 || 0,
+                      alvo3: originalTrade.alvo_3 || 0,
+                      trackPosicao: originalTrade.trackPosicao,
                       status: originalTrade.status === 'Aberto' 
                         ? 'ABERTO' 
                         : originalTrade.status === 'Fechado_Gain' 
@@ -614,12 +967,15 @@ export default function TradeDeskView({
                             ? 'LOSS' 
                             : 'FECHADO',
                       pnl: originalTrade.status === 'Aberto' ? estimatedPnlValue : originalTrade.pnl_realizado,
-                       direcao: (originalTrade.tipo_operacao?.toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG') as 'LONG' | 'SHORT'
+                      direcao: (originalTrade.tipo_operacao?.toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG') as 'LONG' | 'SHORT',
+                      quantidadeRestante: originalTrade.quantidade_restante !== undefined ? originalTrade.quantidade_restante : originalTrade.quantidade,
+                      cotacao: currentPrice,
+                      taxa: originalTrade.taxa_corretora_usd || 0
                     };
 
                     return (
                       <tr 
-                        key={originalTrade.id} 
+                        key={`${originalTrade.id || 'trade'}-${index}`} 
                         className={`border-b border-zinc-800/30 transition-colors hover:bg-zinc-800/40 ${
                           index % 2 === 0 ? 'bg-transparent' : 'bg-zinc-900/20'
                         }`}
@@ -629,29 +985,25 @@ export default function TradeDeskView({
                           {trade.date}
                         </td>
 
-                        {/* STATUS */}
-                        <td className="py-3 w-[36px] text-center">
-                          {renderStatusArrow(trade)}
-                        </td>
-
                         {/* TICKER */}
-                        <td className="w-[90px] py-3 pl-1 pr-2 text-sm font-bold text-white text-left">
-                          {trade.ticker}
-                        </td>
-
-                        {/* INSTITUIÇÃO */}
-                        <td className="w-[130px] py-3 px-2 text-xs font-semibold text-zinc-400 overflow-hidden text-ellipsis whitespace-nowrap text-left" title={trade.institution}>
-                          {trade.institution}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={getLogoUrl(trade.ticker)}
+                              alt={trade.ticker}
+                              className="w-5 h-5 rounded-full"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                            <span className="text-white font-bold text-sm">{trade.ticker}</span>
+                          </div>
                         </td>
 
                         {/* COMPRA */}
-                        <td className="py-3 w-[130px] px-2 text-xs font-mono text-zinc-300 whitespace-nowrap text-right">
-                          <span
-                            className="text-xs font-mono text-zinc-300"
-                            title={`$ ${formatPreciso(trade.buyPrice)}`}
-                          >
-                            $ {formatSmart(trade.buyPrice)}
-                          </span>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col text-right">
+                            <span className="text-white font-mono text-sm">${trade.compra?.toFixed(4)}</span>
+                            <span className="text-zinc-500 font-mono text-xs">${trade.cotacao?.toFixed(4) || '—'}</span>
+                          </div>
                         </td>
 
                         {/* VALOR TOTAL */}
@@ -660,98 +1012,105 @@ export default function TradeDeskView({
                         </td>
 
                         {/* PNL */}
-                        <td className="w-[130px] py-3 px-3 text-right whitespace-nowrap">
-                          <span 
-                            className={`text-sm font-bold font-mono whitespace-nowrap ${getPnlColor(trade.pnl)}`}
-                            title={`$ ${formatPreciso(trade.pnl)}`}
-                          >
-                            {trade.pnl > 0 ? '+' : ''}{trade.pnl === 0 ? '' : '$ '}{formatSmart(trade.pnl)}
-                          </span>
+                        <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
+                          {(() => {
+                            let valorPnl = Number(trade.pnl) || 0;
+
+                            // Se a operação estiver ABERTA, calcula o PNL Flutuante (Unrealized PNL)
+                            if (trade.status === 'OPEN' || trade.status === 'ABERTO') {
+                              const cotacao = Number(trade.cotacao) || Number(trade.compra);
+                              const compra = Number(trade.compra) || 0;
+                              const qtd = Number(trade.quantidade) || 0;
+                              const taxa = Number(trade.taxa) || 0;
+
+                              if (trade.direcao === 'LONG') {
+                                valorPnl = ((cotacao - compra) * qtd) - taxa;
+                              } else if (trade.direcao === 'SHORT') {
+                                valorPnl = ((compra - cotacao) * qtd) - taxa;
+                              }
+                            }
+
+                            const isGain = valorPnl >= 0;
+
+                            return (
+                              <span className={`font-bold font-mono tracking-tight ${isGain ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {isGain ? '+' : '-'}$ {Math.abs(valorPnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* STOP LOSS */}
-                        <td className="py-3 w-[130px] px-2 text-right whitespace-nowrap">
-                          <span 
-                            className="text-xs font-mono text-red-500 font-bold"
-                            title={`$ ${formatPreciso(trade.stopLoss)}`}
-                          >
-                            ${formatSmart(trade.stopLoss)}
-                          </span>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const isStopGain = trade.direcao === 'LONG' ? trade.stopLoss > trade.compra : trade.stopLoss < trade.compra;
+                            return (
+                              <span className={`font-mono text-sm font-bold ${isStopGain ? 'text-green-400' : 'text-red-400'}`}>
+                                ${trade.stopLoss?.toFixed(4)}
+                              </span>
+                            );
+                          })()}
                         </td>
 
-                        {/* TRACK — quadrados com rótulos + tooltip no hover */}
-                        <td className="py-3 px-1 whitespace-nowrap text-center w-auto">
-                          <div className="flex items-center justify-center gap-2">
-                            {/* 5 quadrados de STOP (S1 a S5) */}
-                            <div className="flex items-center gap-0.5">
-                              {[
-                                { label: 'S1', nivel: calcularNivelStop(trade.buyPrice, trade.stopLoss, 0.2) },
-                                { label: 'S2', nivel: calcularNivelStop(trade.buyPrice, trade.stopLoss, 0.4) },
-                                { label: 'S3', nivel: calcularNivelStop(trade.buyPrice, trade.stopLoss, 0.6) },
-                                { label: 'S4', nivel: calcularNivelStop(trade.buyPrice, trade.stopLoss, 0.8) },
-                                { label: 'S5', nivel: calcularNivelStop(trade.buyPrice, trade.stopLoss, 1.0) }
-                              ].map((item, i) => {
-                                const atingiu =
-                                  trade.status === 'LOSS' && i === 4
-                                    ? true
-                                    : trade.status === 'ABERTO' && trade.pnl < 0 && i < Math.ceil(Math.abs(trade.pnl) / ((trade.buyPrice - trade.stopLoss) / 5));
+                        {/* TRACK — nova barra visual horizontal */}
+                        <td className="px-4 py-3 min-w-[280px]">
+                          {(() => {
+                            const { posicoes, posicaoTriangulo } = calcularPosicoesTrack(trade);
+                            const cor = corTriangulo(posicaoTriangulo, trade.status, trade.direcao);
+                            const simboloTriangulo = trade.direcao === 'LONG' ? '▲' : '▼';
 
-                                return (
-                                  <span
-                                    key={`s-${i}`}
-                                    title={`Stop ${item.label}: $ ${formatPreciso(item.nivel)}`}
-                                    className={`w-5 h-5 flex items-center justify-center text-[9px] font-mono font-bold rounded cursor-default transition-colors ${
-                                      atingiu
-                                        ? 'bg-red-500 text-white border border-red-400'
-                                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
-                                    }`}
-                                  >
-                                    {item.label}
-                                  </span>
-                                );
-                              })}
-                            </div>
-
-                            {/* Bolinha de ENTRADA (laranja) — MAIOR que os quadrados */}
-                            <span
-                              title={`Entrada: $ ${formatPreciso(trade.buyPrice)}`}
-                              className={`w-3 h-3 rounded-full bg-orange-500 border border-orange-400 shadow-[0_0_5px_rgba(249,115,22,0.5)] cursor-default ${
-                                trade.status === 'WIN' || trade.status === 'LOSS' ? 'opacity-30' : ''
-                              }`}
-                            />
-
-                            {/* 5 quadrados de TARGET (A1 a A5) */}
-                            <div className="flex items-center gap-0.5">
-                              {trade.targets.filter(Boolean).slice(0, 5).map((alvo, i) => {
-                                const atingiu =
-                                  trade.status === 'WIN' ||
-                                  (trade.status === 'ABERTO' && trade.pnl > 0 && i < Math.ceil(trade.pnl / (alvo / 2)));
-
-                                return (
-                                  <span
-                                    key={`a-${i}`}
-                                    title={`Alvo A${i + 1}: $ ${formatPreciso(alvo)}`}
-                                    className={`w-5 h-5 flex items-center justify-center text-[9px] font-mono font-bold rounded cursor-default transition-colors ${
-                                      atingiu
-                                        ? 'bg-green-500 text-white border border-green-400'
-                                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
-                                    }`}
-                                  >
-                                    {`A${i + 1}`}
-                                  </span>
-                                );
-                              })}
-                              {/* Preencher alvos faltantes com quadrados vazios */}
-                              {Array.from({ length: Math.max(0, 5 - (trade.targets.filter(Boolean).length)) }).map((_, i) => (
-                                <span
-                                  key={`empty-${i}`}
-                                  className="w-5 h-5 flex items-center justify-center text-[9px] font-mono text-zinc-800 bg-zinc-900/50 border border-zinc-800/50 rounded"
-                                >
-                                  -
+                            return (
+                              <div className="flex items-center gap-2 w-full">
+                                <span className={`text-lg font-bold ${cor} flex-shrink-0`}>
+                                  {simboloTriangulo}
                                 </span>
-                              ))}
-                            </div>
-                          </div>
+                                <div className="flex flex-col gap-1 flex-1">
+                                  <div className="flex justify-between w-full">
+                                    {posicoes.map((pos, index) => (
+                                      <div key={index} className="flex flex-col items-center" style={{ width: '14.28%' }}>
+                                        {posicaoTriangulo === index ? (
+                                          <span className={`text-sm font-bold leading-none ${cor}`}>
+                                            {simboloTriangulo}
+                                          </span>
+                                        ) : (
+                                          <span className="text-transparent text-sm leading-none">▲</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex justify-between w-full">
+                                    {posicoes.map((pos, index) => {
+                                      const isAtivo = posicaoTriangulo === index;
+                                      const corLabel = pos.tipo === 'stop'
+                                        ? (isAtivo ? 'text-red-400' : 'text-zinc-600')
+                                        : pos.tipo === 'alvo'
+                                          ? (isAtivo ? 'text-green-400' : 'text-zinc-600')
+                                          : (isAtivo ? 'text-blue-400' : 'text-zinc-500');
+                                      return (
+                                        <div key={index} className="flex flex-col items-center" style={{ width: '14.28%' }}>
+                                          <div className={`text-[9px] font-bold ${corLabel}`}>
+                                            {pos.label}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-300 ${
+                                        posicaoTriangulo <= 2
+                                          ? 'bg-gradient-to-r from-red-500 to-yellow-500'
+                                          : posicaoTriangulo === 3
+                                            ? 'bg-blue-500'
+                                            : 'bg-gradient-to-r from-green-500 to-emerald-400'
+                                      }`}
+                                      style={{ width: `${(posicaoTriangulo / 6) * 100}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* ALVO FINAL — valor do último alvo */}
@@ -776,24 +1135,46 @@ export default function TradeDeskView({
                           })()}
                         </td>
 
+                        {/* INSTITUIÇÃO */}
+                        <td className="px-2 py-3 text-left">
+                          <div className="flex flex-col items-start gap-0.5">
+                            <span className="text-zinc-300 text-xs font-semibold">{trade.instituicao}</span>
+                            {originalTrade.conta_corretora_nome && (
+                              <span className="text-[9px] bg-zinc-900 border border-zinc-750 text-green-400 font-mono px-1.5 py-0.5 rounded truncate max-w-[130px] flex items-center gap-1" title={originalTrade.conta_corretora_nome}>
+                                <span className="w-1 h-1 rounded-full bg-green-500 shrink-0"></span>
+                                {originalTrade.conta_corretora_nome}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
                         {/* OPÇÕES */}
-                        <td className="py-3 w-[110px] px-2 text-center">
-                          <div className="flex items-center justify-center gap-3">
-                            {isAberto && (
-                              <button
-                                onClick={() => {
-                                  const pnl = (currentPrice - originalTrade.preco_compra) * originalTrade.quantidade - originalTrade.taxa_corretora_usd;
-                                  const finalizedStatus = pnl >= 0 ? 'Fechado_Gain' : 'Fechado_Loss';
-                                  setTrades(prev => prev.map(t => t.id === originalTrade.id ? { ...t, status: finalizedStatus, pnl_realizado: Number(pnl.toFixed(4)) } : t));
-                                  showNotification(`Ordem liquidada via Trade Desk! Lucro Líquido: $ ${pnl.toFixed(2)}`, pnl >= 0 ? 'success' : 'error');
-                                }}
-                                className="text-zinc-550 hover:text-red-400 transition-colors cursor-pointer"
-                                title="Liquidar"
+                        <td className="py-3 px-2 text-center col-opcoes">
+                          <div className="flex items-center justify-center gap-2">
+                            {trade.status === 'ABERTO' || trade.status === 'OPEN' ? (
+                              <button 
+                                onClick={() => setModalEncerramento({
+                                  isOpen: true,
+                                  trade: trade,
+                                  cotacaoSaida: '',
+                                  dataSaida: new Date().toISOString().slice(0, 16),
+                                  tipoSaida: 'TOTAL',
+                                  quantidadeSaida: trade.quantidadeRestante || trade.quantidade // Puxa o saldo atual
+                                })}
+                                className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold rounded border border-zinc-600 transition-colors cursor-pointer"
                               >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <circle cx="12" cy="12" r="10" strokeWidth="2" />
-                                  <line x1="4" y1="4" x2="20" y2="20" strokeWidth="2" strokeLinecap="round" />
-                                </svg>
+                                Saída
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => setModalDetalhes({ 
+                                  isOpen: true, 
+                                  trade: { ...trade, originalTrade }, 
+                                  abaAtiva: 'RESUMO' 
+                                })}
+                                className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold rounded border border-zinc-600 transition-colors cursor-pointer"
+                              >
+                                Detalhes
                               </button>
                             )}
                             <button 
@@ -817,14 +1198,13 @@ export default function TradeDeskView({
                   })
                 ) : (
                   <tr>
-                    <td colSpan={11} className="text-center py-8 text-zinc-550 uppercase">
+                    <td colSpan={10} className="text-center py-8 text-zinc-550 uppercase">
                       Nenhuma posição filtrada nesta sessão da mesa de operações.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
         </div>
 
         {/* High Density Ledgers Summary Footer */}
@@ -834,178 +1214,635 @@ export default function TradeDeskView({
         </div>
       </div>
 
-      {/* 2. Área Inferior (Dividida 50% / 50%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        
-        {/* Coluna da Esquerda (50%): Simulador sliders + Registrar Ordem Expressa compact block */}
-        <div className="space-y-6">
-          <MarketSimulator 
-            activeTrades={trades.filter(t => t.status === 'Aberto')} 
-            variations={variations}
-            setVariations={setVariations}
-            onlySliders={true}
-            onSimulationChange={handleSimulationChange} 
-          />
+      {/* ─── SIMULADOR INTERATIVO (Passo 114) ─── */}
+      <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-6 rounded-xl shadow-sm mb-6 flex flex-col">
+        {/* Cabeçalho */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 border-b border-zinc-900 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🧪</span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
+              Projetor de Risco / Retorno
+            </span>
+          </div>
+          {ativoSimulador && (
+            <button
+              onClick={() => handleSelectAtivo(null)}
+              className="text-[9px] text-zinc-500 hover:text-zinc-300 uppercase tracking-widest font-bold border border-zinc-800 px-2.5 py-1 rounded transition-all cursor-pointer"
+            >
+              Limpar Seleção
+            </button>
+          )}
+        </div>
 
-          {/* Rapid Ordem Express Manual Form */}
-          <div className="bg-[#0c0c0e]/80 border border-zinc-800 rounded-lg p-5">
-            <div className="flex items-center justify-between mb-3 border-b border-zinc-800 pb-2.5">
-              <div className="flex items-center gap-2">
-                <Plus className="w-4 h-4 text-green-400" />
-                <h4 className="text-xs font-bold uppercase tracking-widest text-[#e4e4e7]">Registrar Ordem Expressa</h4>
-              </div>
+        {/* Linha de Seleção de Ativos */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {ativosAbertosSimulador.map((ativo, index) => {
+            const isSelected = ativoSimulador === ativo;
+            return (
               <button
-                onClick={() => setShowAddForm(!showAddForm)}
-                className="text-[10px] text-zinc-400 hover:text-white underline cursor-pointer"
+                key={`${ativo}-${index}`}
+                onClick={() => handleSelectAtivo(isSelected ? null : ativo)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                  isSelected 
+                    ? 'bg-violet-600/20 border-violet-500/50 text-white ring-2 ring-violet-500/30 shadow-md shadow-violet-950/20' 
+                    : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                }`}
               >
-                {showAddForm ? 'Fechar' : 'Abrir'}
+                <img 
+                  src={`https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@master/svg/color/${ativo.toLowerCase()}.svg`} 
+                  alt={ativo}
+                  className="w-4 h-4 rounded-full shrink-0"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                />
+                <span>{ativo}</span>
+              </button>
+            );
+          })}
+          {ativosAbertosSimulador.length === 0 && (
+            <span className="text-[10px] text-zinc-500 uppercase font-semibold">
+              Não há posições abertas para análise de risco.
+            </span>
+          )}
+        </div>
+
+        {/* Renderização Condicional do Conteúdo */}
+        {!ativoSimulador ? (
+          <div className="text-center py-12 bg-zinc-950/20 border border-dashed border-zinc-850 rounded-xl">
+            <p className="text-zinc-500 text-xs font-semibold uppercase tracking-wider">
+              Selecione um ativo em aberto acima para projetar cenários de risco/retorno.
+            </p>
+          </div>
+        ) : (() => {
+          const tradesDoAtivo = activeTrades.filter(t => t.moeda.toUpperCase() === ativoSimulador.toUpperCase());
+          const originalTrade = tradesDoAtivo[0];
+          if (!originalTrade) return null;
+
+          const trade = {
+            id: originalTrade.id,
+            ticker: originalTrade.moeda,
+            ativo: originalTrade.moeda,
+            compra: originalTrade.preco_compra,
+            quantidade: originalTrade.quantidade,
+            stopLoss: originalTrade.stop_loss || 0,
+            targets: [
+              originalTrade.alvo_1,
+              originalTrade.alvo_2,
+              originalTrade.alvo_3,
+              originalTrade.alvo_4,
+              originalTrade.alvo_5,
+              originalTrade.alvo_6
+            ].filter(Boolean) as number[],
+            direcao: (originalTrade.tipo_operacao?.toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG') as 'LONG' | 'SHORT',
+          };
+
+          const stopLossVal = trade.stopLoss || (trade.direcao === 'SHORT' ? trade.compra * 1.1 : trade.compra * 0.9);
+          const alvoFinal = trade.targets[trade.targets.length - 1] || (trade.direcao === 'LONG' ? trade.compra * 1.1 : trade.compra * 0.9);
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+              {/* Pior Cenário (Stop Loss) */}
+              {(() => {
+                const isStopGain = trade.direcao === 'LONG' ? trade.stopLoss > trade.compra : trade.stopLoss < trade.compra;
+                const stopPnl = trade.direcao === 'LONG' ? (trade.stopLoss - trade.compra) * trade.quantidade : (trade.compra - trade.stopLoss) * trade.quantidade;
+                
+                return (
+                  <div className={`${isStopGain ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'} border p-5 rounded-xl flex flex-col items-center justify-center text-center transition-colors`}>
+                    <span className={`${isStopGain ? 'text-green-400' : 'text-red-400'} text-xs font-bold uppercase tracking-wider mb-1`}>
+                      Pior Cenário ({isStopGain ? 'Gain' : 'Stop'})
+                    </span>
+                    <span className="text-white font-mono text-xl mb-2">${trade.stopLoss?.toFixed(4) || '0.0000'}</span>
+                    <div className={`${isStopGain ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'} px-3 py-1 rounded font-mono text-sm font-bold`}>
+                      {stopPnl >= 0 ? '+' : '-'}$ {Math.abs(stopPnl).toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Cenário Atual (Breakeven/Mercado) */}
+              <div className="bg-zinc-900 border border-zinc-700 p-5 rounded-xl flex flex-col items-center justify-center text-center">
+                <span className="text-zinc-400 text-xs font-bold uppercase tracking-wider mb-1">Preço de Entrada</span>
+                <span className="text-white font-mono text-xl mb-2">${trade.compra.toFixed(4)}</span>
+                <div className="bg-zinc-800 px-3 py-1 rounded text-zinc-300 font-mono text-sm font-bold">
+                  Risco em Jogo
+                </div>
+              </div>
+
+              {/* Melhor Cenário (Alvo Final) */}
+              <div className="bg-green-500/10 border border-green-500/30 p-5 rounded-xl flex flex-col items-center justify-center text-center">
+                <span className="text-green-400 text-xs font-bold uppercase tracking-wider mb-1">Melhor Cenário (Alvo)</span>
+                <span className="text-white font-mono text-xl mb-2">${alvoFinal.toFixed(4)}</span>
+                <div className="bg-green-500/20 px-3 py-1 rounded text-green-400 font-mono text-sm font-bold">
+                  {trade.direcao === 'LONG' 
+                    ? `+$ ${Math.abs((alvoFinal - trade.compra) * trade.quantidade).toFixed(2)}` 
+                    : `+$ ${Math.abs((trade.compra - alvoFinal) * trade.quantidade).toFixed(2)}`}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Curva de Capital (agora abaixo do Projetor de Risco) */}
+        {tradesFechados.length > 0 && (
+          <div className="bg-[#0c0c0e]/80 border border-zinc-800 p-5 rounded-xl mt-6 shadow-sm flex flex-col">
+            
+            {/* Header do Gráfico: Título e Filtros */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📈</span>
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
+                    Curva de Capital
+                  </span>
+                </div>
+                
+                {/* Botões de Filtro por Ativo */}
+                <div className="flex flex-wrap gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                  {ativosUnicos.map((ativo, index) => (
+                    <button
+                      key={`${ativo}-${index}`}
+                      onClick={() => setFiltroGrafico(ativo)}
+                      className={`px-3 py-1 text-[10px] font-bold rounded transition-colors cursor-pointer ${
+                        filtroGrafico === ativo 
+                          ? 'bg-violet-600 text-white shadow' 
+                          : 'text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {ativo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mini-Métricas: Melhor e Pior Trade */}
+              {melhorTrade && piorTrade && (
+                <div className="flex gap-4">
+                  <div className="flex flex-col items-end">
+                    <span className="text-[9px] uppercase text-zinc-500 font-bold">Melhor Trade</span>
+                    <span className="text-xs font-mono text-green-400 font-bold">
+                      +{melhorTrade.pnl_realizado.toFixed(2)} <span className="text-zinc-600">({melhorTrade.moeda})</span>
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-end border-l border-zinc-800 pl-4">
+                    <span className="text-[9px] uppercase text-zinc-500 font-bold">Pior Trade</span>
+                    <span className="text-xs font-mono text-red-400 font-bold">
+                      {piorTrade.pnl_realizado.toFixed(2)} <span className="text-zinc-600">({piorTrade.moeda})</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Área do Gráfico */}
+            <div className="w-full h-64 mt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dadosGrafico} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={filtroGrafico === 'TODOS' ? '#8b5cf6' : '#3b82f6'} stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor={filtroGrafico === 'TODOS' ? '#8b5cf6' : '#3b82f6'} stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                  <XAxis dataKey="nome" hide />
+                  <YAxis domain={['auto', 'auto']} hide />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                    itemStyle={{ color: filtroGrafico === 'TODOS' ? '#a78bfa' : '#60a5fa', fontWeight: 'bold', fontFamily: 'monospace' }}
+                    labelStyle={{ color: '#a1a1aa', fontSize: '12px', marginBottom: '4px' }}
+                    formatter={(value) => [
+                      `$ ${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 
+                      filtroGrafico === 'TODOS' ? 'Saldo' : 'Lucro Acumulado'
+                    ]}
+                    labelFormatter={(label, payload) => {
+                      if (payload && payload[0]) {
+                        const data = payload[0].payload;
+                        if (data.nome === 'Início') return filtroGrafico === 'TODOS' ? 'Saldo Inicial' : 'Início das Operações';
+                        return `${data.nome} (${data.ativo}) | PNL: ${data.pnlDesteTrade > 0 ? '+' : ''}$${data.pnlDesteTrade.toFixed(2)}`;
+                      }
+                      return label;
+                    }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="equity" 
+                    stroke={filtroGrafico === 'TODOS' ? '#8b5cf6' : '#3b82f6'} 
+                    strokeWidth={3} 
+                    fillOpacity={1} 
+                    fill="url(#colorEquity)" 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ─── MODAL DE ENCERRAMENTO DE OPERAÇÃO ─── */}
+      {modalEncerramento.isOpen && modalEncerramento.trade && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm select-none">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏁</span>
+                <span className="text-sm uppercase tracking-wider text-zinc-100 font-bold">
+                  Registrar Saída
+                </span>
+              </div>
+              <button 
+                onClick={() => setModalEncerramento({ ...modalEncerramento, isOpen: false })}
+                className="text-zinc-555 hover:text-white cursor-pointer"
+              >✕</button>
+            </div>
+
+            {/* Resumo do Trade */}
+            <div className="flex justify-between items-center bg-zinc-800 p-3 rounded-lg border border-zinc-700 mb-4">
+              <div>
+                <p className="text-[10px] uppercase text-zinc-500 font-semibold">Ativo</p>
+                <p className="text-sm font-bold text-white">{modalEncerramento.trade.ativo}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-zinc-500 font-semibold">Direção</p>
+                <p className={`text-sm font-bold ${modalEncerramento.trade.direcao === 'SHORT' ? 'text-red-400' : 'text-green-400'}`}>
+                  {modalEncerramento.trade.direcao}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-zinc-500 font-semibold">Entrada</p>
+                <p className="text-sm font-mono text-zinc-300">$ {modalEncerramento.trade.cotacaoCompra}</p>
+              </div>
+            </div>
+
+            {/* Tipo de Saída (Total vs Parcial) */}
+            <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800 mb-4">
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  modalEncerramento.tipoSaida === 'TOTAL' 
+                    ? 'bg-zinc-800 text-white shadow' 
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+                onClick={() => setModalEncerramento({ 
+                  ...modalEncerramento, 
+                  tipoSaida: 'TOTAL',
+                  quantidadeSaida: modalEncerramento.trade.quantidadeRestante || modalEncerramento.trade.quantidade
+                })}
+              >
+                ENCERRAMENTO TOTAL
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  modalEncerramento.tipoSaida === 'PARCIAL' 
+                    ? 'bg-violet-600 text-white shadow' 
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+                onClick={() => setModalEncerramento({ ...modalEncerramento, tipoSaida: 'PARCIAL' })}
+              >
+                SAÍDA PARCIAL
               </button>
             </div>
 
-            {showAddForm ? (
-              <form onSubmit={handleAddNewTrade} className="space-y-3.5 text-[11px]">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Custódia</label>
-                    <select
-                      value={formData.exchange}
-                      onChange={(e) => setFormData(prev => ({ ...prev, exchange: e.target.value }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-zinc-300 focus:outline-none focus:border-green-500 cursor-pointer text-xs"
-                    >
-                      {institutions.map((inst) => (
-                        <option key={inst.id} value={inst.nome}>
-                          {inst.nome} ({inst.tipo})
-                        </option>
-                      ))}
-                      {institutions.length === 0 && (
-                        <>
-                          <option value="Binance">Binance</option>
-                          <option value="Bybit">Bybit</option>
-                          <option value="MetaMask">MetaMask</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Ticker Moeda *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="SOL"
-                      value={formData.moeda}
-                      onChange={(e) => setFormData(prev => ({ ...prev, moeda: e.target.value }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-white focus:outline-none focus:border-green-500 text-xs"
-                    />
-                  </div>
+            {/* Campo de Quantidade (Aparece apenas se for PARCIAL) */}
+            {modalEncerramento.tipoSaida === 'PARCIAL' && (
+              <div className="flex flex-col mb-4 p-3 bg-violet-500/10 border border-violet-500/30 rounded-lg">
+                <div className="flex justify-between items-end mb-1">
+                  <label className="text-[10px] uppercase tracking-wider text-violet-400 font-semibold">
+                    Quantidade a Realizar
+                  </label>
+                  <span className="text-[10px] text-zinc-400 font-medium">
+                    Disponível: {modalEncerramento.trade.quantidadeRestante || modalEncerramento.trade.quantidade}
+                  </span>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Entrada *</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      placeholder="135.00"
-                      value={formData.preco_compra}
-                      onChange={(e) => setFormData(prev => ({ ...prev, preco_compra: e.target.value.replace(/[^0-9.,]/g, '') }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-zinc-200 focus:outline-none focus:border-green-500 text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Quantidade *</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      required
-                      placeholder="10.0"
-                      value={formData.quantidade}
-                      onChange={(e) => setFormData(prev => ({ ...prev, quantidade: e.target.value.replace(/[^0-9.,]/g, '') }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-zinc-200 focus:outline-none focus:border-green-500 text-xs"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Taxa (USD)</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={formData.taxa_corretora_usd}
-                      onChange={(e) => setFormData(prev => ({ ...prev, taxa_corretora_usd: e.target.value.replace(/[^0-9.,]/g, '') }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-zinc-300 focus:outline-none focus:border-green-500 text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-zinc-550 text-[9px] uppercase tracking-wider mb-1 font-bold">Stop Loss</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="120"
-                      value={formData.stop_loss}
-                      onChange={(e) => setFormData(prev => ({ ...prev, stop_loss: e.target.value.replace(/[^0-9.,]/g, '') }))}
-                      className="w-full bg-[#050507] border border-zinc-850 p-1.5 rounded text-red-400 focus:outline-none focus:border-red-500 text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* Targets setup */}
-                <div className="pt-2 border-t border-zinc-900 space-y-1.5">
-                  <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">Take Profit Targets (USD)</div>
-                  
-                  <div className="grid grid-cols-3 gap-1 px-1">
-                    {[1, 2, 3, 4, 5, 6].map((num) => (
-                      <div key={num}>
-                        <label className="block text-zinc-500 text-[8px] text-center">Alvo {num}</label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="-"
-                          value={(formData as any)[`alvo_${num}`] || ''}
-                          onChange={(e) => setFormData(prev => ({ ...prev, [`alvo_${num}`]: e.target.value.replace(/[^0-9.,]/g, '') }))}
-                          className="w-full bg-[#050507] border border-zinc-850 p-1 text-[10px] text-zinc-300 text-center rounded focus:outline-none focus:border-green-500"
-                        />
-                      </div>
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    className="input-padrao border-violet-500/50 focus:border-violet-400 text-sm py-1.5"
+                    value={modalEncerramento.quantidadeSaida}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      const max = parseFloat(modalEncerramento.trade.quantidadeRestante || modalEncerramento.trade.quantidade);
+                      // Impede que o usuário digite mais do que ele tem
+                      if (val > max) {
+                        setModalEncerramento({...modalEncerramento, quantidadeSaida: max});
+                      } else {
+                        setModalEncerramento({...modalEncerramento, quantidadeSaida: e.target.value});
+                      }
+                    }}
+                  />
+                  {/* Botões rápidos de % */}
+                  <div className="flex gap-1">
+                    {[25, 50, 75].map(pct => (
+                      <button 
+                        key={pct}
+                        type="button"
+                        className="px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-bold rounded border border-zinc-700 cursor-pointer"
+                        onClick={() => {
+                          const max = parseFloat(modalEncerramento.trade.quantidadeRestante || modalEncerramento.trade.quantidade);
+                          setModalEncerramento({...modalEncerramento, quantidadeSaida: Number((max * (pct/100)).toFixed(4))});
+                        }}
+                      >
+                        {pct}%
+                      </button>
                     ))}
                   </div>
                 </div>
-
-                <button
-                  type="submit"
-                  className="w-full p-2.5 bg-green-500 text-black uppercase font-black text-xs rounded hover:bg-green-400 transition-all cursor-pointer font-bold select-none text-center block"
-                >
-                  Confirmar e Lançar Ordem
-                </button>
-              </form>
-            ) : (
-              <div className="text-center py-5 bg-zinc-950/20 border border-dashed border-zinc-850 rounded">
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-[10px] font-bold rounded border border-zinc-800 transition-all cursor-pointer"
-                >
-                  + preencher manual express
-                </button>
               </div>
             )}
+
+            {/* Campos de Saída */}
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
+                  Data e Hora de Saída
+                </label>
+                <input 
+                  type="datetime-local" 
+                  className="input-padrao"
+                  value={modalEncerramento.dataSaida}
+                  onChange={(e) => setModalEncerramento({...modalEncerramento, dataSaida: e.target.value})}
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
+                  Cotação de Saída (USD)
+                </label>
+                <input 
+                  type="number" 
+                  step="0.000001"
+                  className="input-padrao text-lg font-mono"
+                  placeholder="Ex: 65000.00"
+                  value={modalEncerramento.cotacaoSaida}
+                  onChange={(e) => setModalEncerramento({...modalEncerramento, cotacaoSaida: e.target.value})}
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Preview de Resultado (PNL) */}
+            <div className={`p-4 rounded-lg border mb-6 flex flex-col items-center justify-center transition-colors ${
+              !modalEncerramento.cotacaoSaida ? 'bg-zinc-950 border-zinc-800' :
+              isWin ? 'bg-green-500/10 border-green-500/50' : 
+              'bg-red-500/10 border-red-500/50'
+            }`}>
+              <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold mb-1">
+                Resultado Estimado (PNL)
+              </span>
+              <span className={`text-2xl font-mono font-bold ${
+                !modalEncerramento.cotacaoSaida ? 'text-zinc-650' :
+                isWin ? 'text-green-400' : 'text-red-400'
+              }`}>
+                {pnlPreview > 0 ? '+' : ''}$ {Math.abs(pnlPreview).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="flex gap-2">
+              <button 
+                className={`flex-1 h-10 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                  !modalEncerramento.cotacaoSaida || !modalEncerramento.quantidadeSaida
+                    ? 'bg-zinc-700 cursor-not-allowed opacity-50' 
+                    : isWin ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'
+                }`}
+                disabled={!modalEncerramento.cotacaoSaida || !modalEncerramento.quantidadeSaida}
+                onClick={() => {
+                  const isTotal = modalEncerramento.tipoSaida === 'TOTAL';
+                  const classificacaoReal = classificarTempoTrade(modalEncerramento.trade.dataEntrada, modalEncerramento.dataSaida);
+                  
+                  console.log(`Registrando Saída ${isTotal ? 'TOTAL' : 'PARCIAL'}!`, {
+                    quantidade: modalEncerramento.quantidadeSaida,
+                    cotacaoSaida: modalEncerramento.cotacaoSaida,
+                    pnlDestaSaida: pnlPreview,
+                    statusFinal: isTotal ? (isWin ? 'WIN' : 'LOSS') : 'OPEN (Parcial)',
+                    novoSaldoBanca: saldoBanca + pnlPreview
+                  });
+
+                  setSaldoBanca(prev => prev + pnlPreview);
+
+                  const finalizedStatus = isWin ? 'Fechado_Gain' : 'Fechado_Loss';
+                  
+                  setTrades(prev => prev.map(t => {
+                    if (t.id === modalEncerramento.trade.id) {
+                      const operacao = {
+                        ...t,
+                        compra: t.preco_compra,
+                        stopLoss: t.stop_loss || 0,
+                        cotacao: parseFloat(modalEncerramento.cotacaoSaida),
+                        alvo1: t.alvo_1 || 0,
+                        alvo2: t.alvo_2 || 0,
+                        alvo3: t.alvo_3 || 0,
+                        direcao: t.tipo_operacao?.toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG',
+                        status: isTotal ? (isWin ? 'WIN' : 'LOSS') : 'ABERTO',
+                        trackPosicao: undefined as number | undefined
+                      };
+                      const { posicaoTriangulo } = calcularPosicoesTrack(operacao);
+                      operacao.trackPosicao = posicaoTriangulo;
+
+                      if (isTotal) {
+                        return { 
+                          ...t, 
+                          status: finalizedStatus, 
+                          quantidade_restante: 0,
+                          pnl_realizado: Number((t.pnl_realizado + pnlPreview).toFixed(4)),
+                          trackPosicao: operacao.trackPosicao
+                        };
+                      } else {
+                        const currentRemaining = t.quantidade_restante !== undefined ? t.quantidade_restante : t.quantidade;
+                        const newRemaining = Math.max(0, currentRemaining - parseFloat(modalEncerramento.quantidadeSaida.toString()));
+                        return {
+                          ...t,
+                          quantidade_restante: newRemaining,
+                          pnl_realizado: Number((t.pnl_realizado + pnlPreview).toFixed(4)),
+                          status: newRemaining <= 0 ? finalizedStatus : t.status,
+                          trackPosicao: newRemaining <= 0 ? operacao.trackPosicao : t.trackPosicao
+                        };
+                      }
+                    }
+                    return t;
+                  }));
+
+                  showNotification(
+                    isTotal 
+                      ? `Operação encerrada! PNL Realizado: $ ${pnlPreview.toFixed(2)} (${classificacaoReal})`
+                      : `Saída parcial registrada! PNL Realizado nesta parcial: $ ${pnlPreview.toFixed(2)}`, 
+                    isWin ? 'success' : 'error'
+                  );
+
+                  setModalEncerramento({ isOpen: false, trade: null, cotacaoSaida: '', dataSaida: '', tipoSaida: 'TOTAL', quantidadeSaida: '' });
+                }}
+              >
+                {modalEncerramento.tipoSaida === 'TOTAL' ? 'CONFIRMAR ENCERRAMENTO' : 'REGISTRAR PARCIAL'}
+              </button>
+            </div>
+
           </div>
         </div>
+      )}
 
-        {/* Coluna da Direita (50%): Impacto no Portfólio Simulado */}
-        <div>
-          <MarketSimulator 
-            activeTrades={trades.filter(t => t.status === 'Aberto')} 
-            variations={variations}
-            setVariations={setVariations}
-            onlyImpact={true}
-            onSimulationChange={handleSimulationChange} 
-          />
-        </div>
+      {/* ─── MODAL DE DETALHES (RAIO-X) ─── */}
+      {(() => {
+        if (!modalDetalhes.isOpen || !modalDetalhes.trade) return null;
 
-      </div>
+        const parsedDiary = (() => {
+          try {
+            const notasStr = modalDetalhes.trade.originalTrade?.notas;
+            if (notasStr && typeof notasStr === 'string' && (notasStr.startsWith('{') || notasStr.startsWith('['))) {
+              return JSON.parse(notasStr);
+            }
+          } catch (e) {}
+          return {};
+        })();
+
+        const tradeParaExibir = {
+          ...modalDetalhes.trade,
+          intencaoTrade: parsedDiary.intencaoTrade || 'Não definida',
+          classificacaoTempo: parsedDiary.classificacaoTempo || (modalDetalhes.trade.originalTrade?.data_hora && modalDetalhes.trade.originalTrade?.data_saida 
+            ? classificarTempoTrade(modalDetalhes.trade.originalTrade.data_hora, modalDetalhes.trade.originalTrade.data_saida) 
+            : 'DAY_TRADE'),
+          nota: parsedDiary.notaTrade || 0,
+          seguiuPlano: parsedDiary.seguiuPlano === true || parsedDiary.seguiuPlano === 'Sim' || parsedDiary.seguiuPlano === 'yes' || parsedDiary.seguiuPlano === 'SIM',
+          cometeuErro: parsedDiary.erroOperacional === true || parsedDiary.erroOperacional === 'Sim' || parsedDiary.erroOperacional === 'yes' || parsedDiary.erroOperacional === 'SIM',
+          licoes: parsedDiary.licaoAprendida || 'Nenhuma anotação registrada para este trade.',
+          alvo1: modalDetalhes.trade.targets ? modalDetalhes.trade.targets[0] : 0,
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 select-none">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+              
+              {/* Header Fixo */}
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-start">
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                      tradeParaExibir.status === 'WIN' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {tradeParaExibir.status}
+                    </span>
+                    <h2 className="text-xl font-bold text-white">{tradeParaExibir.ativo}</h2>
+                    <span className={`text-sm font-bold ${tradeParaExibir.direcao === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                      {tradeParaExibir.direcao}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 font-mono">{tradeParaExibir.dataEntrada}</p>
+                </div>
+                <button 
+                  onClick={() => setModalDetalhes({ isOpen: false, trade: null, abaAtiva: 'RESUMO' })}
+                  className="text-zinc-500 hover:text-white p-1 cursor-pointer"
+                >✕</button>
+              </div>
+
+              {/* Navegação de Abas */}
+              <div className="flex px-6 pt-4 border-b border-zinc-800 gap-6">
+                {[
+                  { id: 'RESUMO', label: '📊 Resumo Financeiro' },
+                  { id: 'DIARIO', label: '📓 Diário do Trade' },
+                  { id: 'EXECUCAO', label: '⚙️ Execução' }
+                ].map(aba => (
+                  <button
+                    key={aba.id}
+                    onClick={() => setModalDetalhes({ ...modalDetalhes, abaAtiva: aba.id as 'RESUMO' | 'DIARIO' | 'EXECUCAO' })}
+                    className={`pb-3 text-sm font-semibold transition-colors border-b-2 cursor-pointer ${
+                      modalDetalhes.abaAtiva === aba.id 
+                        ? 'border-violet-500 text-violet-400' 
+                        : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {aba.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Conteúdo Rolável */}
+              <div className="p-6 overflow-y-auto flex-1 text-[#e4e4e7]">
+                
+                {/* ABA: RESUMO */}
+                {modalDetalhes.abaAtiva === 'RESUMO' && (
+                  <div className="space-y-6">
+                    {/* PNL e Tempo */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+                        <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Resultado Final (PNL)</p>
+                        <p className={`text-2xl font-mono font-bold ${tradeParaExibir.pnl > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {tradeParaExibir.pnl > 0 ? '+' : ''}$ {Math.abs(tradeParaExibir.pnl || 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+                        <p className="text-[10px] uppercase text-zinc-500 font-bold mb-1">Expectativa vs Realidade</p>
+                        <div className="flex flex-col gap-1 mt-2">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-400">Intenção:</span>
+                            <span className="text-white font-semibold">{tradeParaExibir.intencaoTrade}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-400">Realidade:</span>
+                            <span className="text-violet-400 font-semibold">{tradeParaExibir.classificacaoTempo}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ABA: DIÁRIO */}
+                {modalDetalhes.abaAtiva === 'DIARIO' && (
+                  <div className="space-y-6">
+                    <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+                      <p className="text-[10px] uppercase text-zinc-500 font-bold mb-3">Avaliação da Execução</p>
+                      <div className="flex gap-1 mb-4">
+                        {[1,2,3,4,5].map(star => (
+                          <span key={star} className={`text-xl ${star <= (tradeParaExibir.nota || 0) ? 'text-amber-400' : 'text-zinc-700'}`}>
+                            ★
+                          </span>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="text-zinc-400">Seguiu o Plano?</span>
+                          <span className="text-white font-bold">{tradeParaExibir.seguiuPlano ? '✅ Sim' : '❌ Não'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-zinc-400">Cometeu Erro?</span>
+                          <span className="text-white font-bold">{tradeParaExibir.cometeuErro ? '⚠️ Sim' : '✨ Não'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+                      <p className="text-[10px] uppercase text-zinc-500 font-bold mb-2">Lições Aprendidas</p>
+                      <p className="text-sm text-zinc-300 italic">
+                        "{tradeParaExibir.licoes}"
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ABA: EXECUÇÃO */}
+                {modalDetalhes.abaAtiva === 'EXECUCAO' && (
+                  <div className="space-y-4 text-[#e4e4e7]">
+                    <div className="flex justify-between items-center p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                      <span className="text-xs text-zinc-400 uppercase font-bold">Preço de Entrada</span>
+                      <span className="text-sm font-mono text-white">$ {tradeParaExibir.cotacaoCompra}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-red-500/5 rounded-lg border border-red-500/20">
+                      <span className="text-xs text-red-400 uppercase font-bold">Stop Loss</span>
+                      <span className="text-sm font-mono text-red-400">$ {tradeParaExibir.stopLoss || '—'}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-green-500/5 rounded-lg border border-green-500/20">
+                      <span className="text-xs text-green-400 uppercase font-bold">Alvo Principal</span>
+                      <span className="text-sm font-mono text-green-400">$ {tradeParaExibir.alvo1 || '—'}</span>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

@@ -10,10 +10,11 @@ import {
   AlertTriangle,
   Lightbulb
 } from 'lucide-react';
-import { Instituicao } from '../types';
+import { Instituicao, BrokerAccount } from '../types';
 
 interface NewHoldFormProps {
   institutions: Instituicao[];
+  brokerAccounts?: BrokerAccount[];
   onSubmitHold: (newHoldData: {
     data_hora: string;
     exchange: string;
@@ -26,12 +27,15 @@ interface NewHoldFormProps {
     alvo_2: number | null;
     alvo_3: number | null;
     notas: string;
+    conta_corretora_id?: string;
+    conta_corretora_nome?: string;
   }) => void;
   onCancel: () => void;
 }
 
 export default function NewHoldForm({
   institutions,
+  brokerAccounts = [],
   onSubmitHold,
   onCancel
 }: NewHoldFormProps) {
@@ -43,6 +47,8 @@ export default function NewHoldForm({
   // State handles
   const [dataHora, setDataHora] = useState(getCurrentDateTime());
   const [exchange, setExchange] = useState(institutions[0]?.nome || 'Binance');
+  const [contaCorretoraId, setContaCorretoraId] = useState('');
+  const [contaCorretoraNome, setContaCorretoraNome] = useState('');
   const [moeda, setMoeda] = useState('');
   const [tipo, setTipo] = useState<'Compra' | 'Venda'>('Compra');
   
@@ -154,7 +160,9 @@ export default function NewHoldForm({
       alvo_1: parseOptionalAlvo(alvo1),
       alvo_2: parseOptionalAlvo(alvo2),
       alvo_3: parseOptionalAlvo(alvo3),
-      notas: notas.trim()
+      notas: notas.trim(),
+      conta_corretora_id: contaCorretoraId || undefined,
+      conta_corretora_nome: contaCorretoraNome || undefined,
     });
   };
 
@@ -237,6 +245,33 @@ export default function NewHoldForm({
                   <option key={inst.id} value={inst.nome}>{inst.nome}</option>
                 ))}
               </select>
+
+              {brokerAccounts && brokerAccounts.length > 0 && (
+                <div className="mt-1.5">
+                  <select
+                    value={contaCorretoraId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setContaCorretoraId(id);
+                      const found = brokerAccounts.find(a => a.id === id);
+                      if (found) {
+                        setContaCorretoraNome(found.nome_conta);
+                        if (found.broker) setExchange(found.broker);
+                      } else {
+                        setContaCorretoraNome('');
+                      }
+                    }}
+                    className="w-full bg-[#07070a] border border-zinc-800 rounded p-1 text-[11px] text-green-400 font-mono focus:outline-none focus:border-green-500 cursor-pointer"
+                  >
+                    <option value="">Vincular a uma Conta de Corretora (Opcional)</option>
+                    {brokerAccounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.broker}: {acc.nome_conta}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div>

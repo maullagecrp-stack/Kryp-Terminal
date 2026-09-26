@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
-import { Instituicao, Trade } from '../types';
+import { Instituicao, Trade, BrokerAccount } from '../types';
 
 /**
  * Formata valores numéricos com casas decimais adaptativas.
@@ -364,6 +364,7 @@ const calcularOperacao = async (quantidade: number, cotacaoCompraUSD: number, qu
 
 interface NewTradeFormProps {
   institutions: Instituicao[];
+  brokerAccounts?: BrokerAccount[];
   onSubmitTrade: (newTradeData: {
     data_hora: string;
     exchange: string;
@@ -383,27 +384,34 @@ interface NewTradeFormProps {
     notas: string;
     moeda_taxa: string;
     quantidade_taxa: number;
+    conta_corretora_id?: string;
+    conta_corretora_nome?: string;
   }) => void;
   onCancel: () => void;
   tradeToEdit?: Trade | null;
+  saldoBanca?: number;
 }
 
 export default function NewTradeForm({
   institutions,
+  brokerAccounts = [],
   onSubmitTrade,
   onCancel,
-  tradeToEdit
+  tradeToEdit,
+  saldoBanca = 10000.00
 }: NewTradeFormProps) {
-  // Current date in YYYY-MM-DD format for input value default
+  // Current date in YYYY-MM-DDTHH:mm format for input value default
   const getCurrentDate = () => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000; //offset in milliseconds
-    const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
+    const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 16);
     return localISOTime;
   };
 
   // Bloco A States
   const [dataHora, setDataHora] = useState(getCurrentDate());
   const [exchange, setExchange] = useState(institutions[0]?.nome || 'Binance');
+  const [contaCorretoraId, setContaCorretoraId] = useState(tradeToEdit?.conta_corretora_id || '');
+  const [contaCorretoraNome, setContaCorretoraNome] = useState(tradeToEdit?.conta_corretora_nome || '');
   const [ativoBase, setAtivoBase] = useState('');
   const [ativoCotacao, setAtivoCotacao] = useState('USDT');
   const [cotacaoAtual, setCotacaoAtual] = useState('');
@@ -813,48 +821,31 @@ export default function NewTradeForm({
     return `${sign}${actualPct.toFixed(1)}%`;
   };
 
-  const handlePrecoCompraChange = (rawVal: string) => {
-    const val = formatNumberInput(rawVal);
-    setPrecoCompra(val);
-
-    const p = parseToFloat(val);
-    const q = parseToFloat(quantidade);
-    const v = parseToFloat(valorInvestido);
-
-    if (p > 0 && q > 0) {
-      setValorInvestido(String(Number((p * q).toFixed(8))));
-    } else if (p > 0 && v > 0) {
-      setQuantidade(String(Number((v / p).toFixed(8))));
-    }
-  };
-
-  const handleQuantidadeChange = (rawVal: string) => {
-    const val = formatNumberInput(rawVal);
-    setQuantidade(val);
-
-    const q = parseToFloat(val);
-    const p = parseToFloat(precoCompra);
-    const v = parseToFloat(valorInvestido);
-
-    if (p > 0 && q > 0) {
-      setValorInvestido(String(Number((p * q).toFixed(8))));
-    } else if (q > 0 && v > 0) {
-      setPrecoCompra(String(Number((v / q).toFixed(8))));
-    }
-  };
-
-  const handleValorInvestidoChange = (rawVal: string) => {
-    const val = rawVal.replace(/[^0-9.,]/g, '');
-    setValorInvestido(val);
-
-    const v = parseToFloat(val);
-    const p = parseToFloat(precoCompra);
-    const q = parseToFloat(quantidade);
-
-    if (p > 0 && v > 0) {
-      setQuantidade(String(Number((v / p).toFixed(8))));
-    } else if (q > 0 && v > 0) {
-      setPrecoCompra(String(Number((v / q).toFixed(8))));
+  const handleExecucaoChange = (campo: 'cotacaoCompra' | 'quantidade' | 'valorInvestido', valor: string) => {
+    if (campo === 'valorInvestido') {
+      const val = formatNumberInput(valor);
+      setValorInvestido(val);
+      const v = parseToFloat(val);
+      const p = parseToFloat(precoCompra);
+      if (p > 0 && v > 0) {
+        setQuantidade(String(Number((v / p).toFixed(8))));
+      }
+    } else if (campo === 'quantidade') {
+      const val = formatNumberInput(valor);
+      setQuantidade(val);
+      const q = parseToFloat(val);
+      const p = parseToFloat(precoCompra);
+      if (p > 0 && q > 0) {
+        setValorInvestido(String(Number((q * p).toFixed(8))));
+      }
+    } else if (campo === 'cotacaoCompra') {
+      const val = formatNumberInput(valor);
+      setPrecoCompra(val);
+      const p = parseToFloat(val);
+      const v = parseToFloat(valorInvestido);
+      if (p > 0 && v > 0) {
+        setQuantidade(String(Number((v / p).toFixed(8))));
+      }
     }
   };
 
@@ -866,6 +857,8 @@ export default function NewTradeForm({
   const [alvo4, setAlvo4] = useState('0');
   const [alvo5, setAlvo5] = useState('0');
   const [riscoMaximo, setRiscoMaximo] = useState('');
+  const [tipoRisco, setTipoRisco] = useState<'USD' | 'PERCENTUAL'>('USD'); // 'USD' ou 'PERCENTUAL'
+  const [riscoPercentual, setRiscoPercentual] = useState(''); // Ex: 1 para 1%
   const [showModalRisco, setShowModalRisco] = useState(false);
   const [showModalDiario, setShowModalDiario] = useState(false);
   const [rrSelecionado, setRrSelecionado] = useState<number | null>(null);
@@ -904,9 +897,7 @@ export default function NewTradeForm({
     if (dirUpper === 'LONG') {
       switch (campo) {
         case 'stopLoss':
-          if (num >= cotacaoCompra) {
-            return { valido: false, mensagem: `Stop Loss (${num}) deve ser MENOR que a entrada (${cotacaoCompra}) em LONG` };
-          }
+          // Trailing Stop (Stop Gain) permitido: sem validação rígida de limite de entrada
           break;
         case 'alvo1':
           if (num <= cotacaoCompra) {
@@ -937,9 +928,7 @@ export default function NewTradeForm({
     } else if (dirUpper === 'SHORT') {
       switch (campo) {
         case 'stopLoss':
-          if (num <= cotacaoCompra) {
-            return { valido: false, mensagem: `Stop Loss (${num}) deve ser MAIOR que a entrada (${cotacaoCompra}) em SHORT` };
-          }
+          // Trailing Stop (Stop Gain) permitido: sem validação rígida de limite de entrada
           break;
         case 'alvo1':
           if (num >= cotacaoCompra) {
@@ -973,9 +962,9 @@ export default function NewTradeForm({
   };
 
   useEffect(() => {
-    const campos = ['stopLoss', 'alvo1', 'alvo2', 'alvo3', 'alvo4', 'alvo5'];
+    const campos = ['stopLoss', 'alvo1', 'alvo2', 'alvo3'];
     const newErrors: Record<string, string> = {};
-    const vals: Record<string, string> = { stopLoss, alvo1, alvo2, alvo3, alvo4, alvo5 };
+    const vals: Record<string, string> = { stopLoss, alvo1, alvo2, alvo3 };
 
     for (const campo of campos) {
       const result = validarGestaoRisco(campo, vals[campo], tipoOperacao, precoCompra);
@@ -984,7 +973,7 @@ export default function NewTradeForm({
       }
     }
     setErrors(newErrors);
-  }, [tipoOperacao, precoCompra, stopLoss, alvo1, alvo2, alvo3, alvo4, alvo5]);
+  }, [tipoOperacao, precoCompra, stopLoss, alvo1, alvo2, alvo3]);
 
   // Bloco D States
   const [strategies, setStrategies] = useState<{ id: string | number; name: string }[]>([]);
@@ -1001,6 +990,7 @@ export default function NewTradeForm({
   const [emocaoTrade, setEmocaoTrade] = useState<'CALMO' | 'ANSIOSO' | 'MEDO' | 'GANANCIA' | 'DUVIDA' | 'NEUTRO' | null>(null);
   const [disciplinaTrade, setDisciplinaTrade] = useState<'SEGUIU' | 'DESVIOU' | 'IGNOROU' | null>(null);
   const [licaoAprendida, setLicaoAprendida] = useState('');
+  const [intencaoTrade, setIntencaoTrade] = useState<'SCALPING' | 'DAY_TRADE' | 'SWING_TRADE' | 'POSITION' | ''>('');
 
   // Local validation error message
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -1165,7 +1155,7 @@ export default function NewTradeForm({
   // Handle default exchange update or pre-fill if tradeToEdit is provided
   useEffect(() => {
     if (tradeToEdit) {
-      setDataHora(tradeToEdit.data_hora ? tradeToEdit.data_hora.slice(0, 10) : getCurrentDate());
+      setDataHora(tradeToEdit.data_hora ? tradeToEdit.data_hora.slice(0, 16) : getCurrentDate());
       setExchange(tradeToEdit.exchange);
       setMoeda(tradeToEdit.moeda);
       setAtivoBase(tradeToEdit.moeda);
@@ -1194,6 +1184,7 @@ export default function NewTradeForm({
           setEmocaoTrade(diary.emocaoTrade || null);
           setDisciplinaTrade(diary.disciplinaTrade || null);
           setLicaoAprendida(diary.licaoAprendida || '');
+          setIntencaoTrade(diary.intencaoTrade || '');
           setNotas(loadedNotas);
         } else {
           setGatilhoEntrada('');
@@ -1205,6 +1196,7 @@ export default function NewTradeForm({
           setEmocaoTrade(null);
           setDisciplinaTrade(null);
           setLicaoAprendida('');
+          setIntencaoTrade('');
           setNotas(loadedNotas);
         }
       } catch (e) {
@@ -1217,6 +1209,7 @@ export default function NewTradeForm({
         setEmocaoTrade(null);
         setDisciplinaTrade(null);
         setLicaoAprendida('');
+        setIntencaoTrade('');
         setNotas(loadedNotas);
       }
       setMoedaTaxa(tradeToEdit.moeda_taxa || 'USDT');
@@ -1270,6 +1263,7 @@ export default function NewTradeForm({
     setEmocaoTrade(null);
     setDisciplinaTrade(null);
     setLicaoAprendida('');
+    setIntencaoTrade('');
     setValidationError(null);
     setResultados({
       investidoQuote: 0,
@@ -1314,6 +1308,44 @@ export default function NewTradeForm({
     tipoQuote: resultados.tipoQuote,
   };
 
+  // Cálculo automático dos Stops de referência e Alvos percentuais
+  const compraNum = parseToFloat(precoCompra);
+  const stopNum = parseToFloat(stopLoss);
+  const a1Num = parseToFloat(alvo1);
+  const a2Num = parseToFloat(alvo2);
+  const a3Num = parseToFloat(alvo3);
+
+  let s1Calculado: number | null = null;
+  let s2Calculado: number | null = null;
+  let s3Calculado: number | null = null;
+  let alvo1PctCalculado: number | null = null;
+  let alvo2PctCalculado: number | null = null;
+  let alvo3PctCalculado: number | null = null;
+
+  if (compraNum > 0 && stopNum > 0) {
+    const isShort = tipoOperacao === 'Short';
+    const dist = Math.abs(compraNum - stopNum);
+    
+    s1Calculado = isShort ? (compraNum + 0.3 * dist) : (compraNum - 0.3 * dist);
+    s2Calculado = isShort ? (compraNum + 0.7 * dist) : (compraNum - 0.7 * dist);
+    s3Calculado = stopNum;
+
+    if (dist > 0) {
+      if (a1Num > 0) {
+        const distAlvo1 = isShort ? (compraNum - a1Num) : (a1Num - compraNum);
+        alvo1PctCalculado = (distAlvo1 / dist) * 100;
+      }
+      if (a2Num > 0) {
+        const distAlvo2 = isShort ? (compraNum - a2Num) : (a2Num - compraNum);
+        alvo2PctCalculado = (distAlvo2 / dist) * 100;
+      }
+      if (a3Num > 0) {
+        const distAlvo3 = isShort ? (compraNum - a3Num) : (a3Num - compraNum);
+        alvo3PctCalculado = (distAlvo3 / dist) * 100;
+      }
+    }
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError(null);
@@ -1348,14 +1380,12 @@ export default function NewTradeForm({
       return;
     }
 
-    // Validar todos os campos de gestão de risco
+    // Validar todos os campos de gestão de risco (apenas 3 alvos)
     const camposRisco = [
       { key: 'stopLoss', value: stopLoss, label: 'Stop Loss' },
       { key: 'alvo1', value: alvo1, label: 'Alvo 1' },
       { key: 'alvo2', value: alvo2, label: 'Alvo 2' },
       { key: 'alvo3', value: alvo3, label: 'Alvo 3' },
-      { key: 'alvo4', value: alvo4, label: 'Alvo 4' },
-      { key: 'alvo5', value: alvo5, label: 'Alvo 5' },
     ];
     
     let hasRiskError = false;
@@ -1386,17 +1416,6 @@ export default function NewTradeForm({
     const slRaw = parsePrice(stopLoss);
     const sl = (slRaw !== null && slRaw !== 0) ? slRaw * quotePriceInUsd : null;
 
-    if (sl !== null && sl !== 0) {
-      if (tipoOperacao === 'Long' && sl >= pCompra) {
-        setValidationError('No Long, o Stop Loss deve ser menor que o preço de entrada.');
-        return;
-      }
-      if (tipoOperacao === 'Short' && sl <= pCompra) {
-        setValidationError('No Short, o Stop Loss deve ser maior que o preço de entrada.');
-        return;
-      }
-    }
-
     if (a1 !== null && a1 !== 0) {
       if (tipoOperacao === 'Long' && a1 <= pCompra) {
         setValidationError('No Long, o Alvo 1 deve ser maior que o preço de entrada.');
@@ -1410,8 +1429,6 @@ export default function NewTradeForm({
 
     const a2Raw = parsePrice(alvo2);
     const a3Raw = parsePrice(alvo3);
-    const a4Raw = parsePrice(alvo4);
-    const a5Raw = parsePrice(alvo5);
 
     const diaryData = {
       gatilhoEntrada,
@@ -1423,6 +1440,13 @@ export default function NewTradeForm({
       emocaoTrade,
       disciplinaTrade,
       licaoAprendida,
+      intencaoTrade,
+      s1: s1Calculado,
+      s2: s2Calculado,
+      s3: s3Calculado,
+      alvo1Pct: alvo1PctCalculado,
+      alvo2Pct: alvo2PctCalculado,
+      alvo3Pct: alvo3PctCalculado,
       exchangeMeta: (quote !== 'USD' && quote !== 'USDT' ? `[Moeda Original: ${quote}, Taxa de Câmbio: ${quotePriceInUsd.toFixed(4)}]` : '')
     };
 
@@ -1438,14 +1462,16 @@ export default function NewTradeForm({
       alvo_1: a1,
       alvo_2: (a2Raw !== null && a2Raw !== 0) ? a2Raw * quotePriceInUsd : null,
       alvo_3: (a3Raw !== null && a3Raw !== 0) ? a3Raw * quotePriceInUsd : null,
-      alvo_4: (a4Raw !== null && a4Raw !== 0) ? a4Raw * quotePriceInUsd : null,
-      alvo_5: (a5Raw !== null && a5Raw !== 0) ? a5Raw * quotePriceInUsd : null,
+      alvo_4: null,
+      alvo_5: null,
       alvo_6: null,
       tipo_operacao: tipoOperacao,
       estrategia,
       notas: JSON.stringify(diaryData),
       moeda_taxa: moedaTaxa,
       quantidade_taxa: parseFloat(quantidadeTaxa.replace(',', '.')) || 0,
+      conta_corretora_id: contaCorretoraId || undefined,
+      conta_corretora_nome: contaCorretoraNome || undefined,
     });
   };
 
@@ -1457,7 +1483,7 @@ export default function NewTradeForm({
     ? 'focus:border-green-500' 
     : direction === 'SHORT' 
     ? 'focus:border-red-500' 
-    : 'focus:border-zinc-500';
+    : 'focus:border-violet-500';
 
   const classeCard = `bg-[#0c0c0e]/85 border rounded-lg p-4 transition-colors duration-300 ${
     tema === 'LONG' ? 'border-green-500 card-long' :
@@ -1547,18 +1573,20 @@ export default function NewTradeForm({
           </div>
           
           <div className="flex flex-row w-full gap-4">
-            <div className="w-48 shrink-0">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="w-48 shrink-0 flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Direção
               </label>
-              <div className="flex items-center gap-1.5 w-full h-[29px]">
+              <div className="flex gap-2 w-full">
                 <button
                   type="button"
                   onClick={() => handleDirecao('Long')}
                   className={
-                    tema === 'LONG' ? 'btn-long-ativo flex-1 h-full font-bold text-center text-[10px]' :
-                    tema === 'NEUTRO' ? 'btn-long-neutro flex-1 h-full font-bold text-center text-[10px]' :
-                    'btn-inativo flex-1 h-full font-bold text-center text-[10px]'
+                    tema === 'LONG'
+                      ? 'bg-green-500 border border-green-500 text-white font-bold text-xs py-2.5 rounded-lg transition-colors flex-1 text-center cursor-pointer'
+                      : tema === 'NEUTRO'
+                      ? 'bg-transparent border border-green-500 text-green-500 font-bold text-xs py-2.5 rounded-lg hover:bg-green-500/10 transition-colors flex-1 text-center cursor-pointer'
+                      : 'bg-transparent border border-zinc-800 text-zinc-500 font-bold text-xs py-2.5 rounded-lg hover:border-zinc-700 transition-colors flex-1 text-center cursor-pointer opacity-50'
                   }
                 >
                   LONG
@@ -1567,9 +1595,11 @@ export default function NewTradeForm({
                   type="button"
                   onClick={() => handleDirecao('Short')}
                   className={
-                    tema === 'SHORT' ? 'btn-short-ativo flex-1 h-full font-bold text-center text-[10px]' :
-                    tema === 'NEUTRO' ? 'btn-short-neutro flex-1 h-full font-bold text-center text-[10px]' :
-                    'btn-inativo flex-1 h-full font-bold text-center text-[10px]'
+                    tema === 'SHORT'
+                      ? 'bg-red-500 border border-red-500 text-white font-bold text-xs py-2.5 rounded-lg transition-colors flex-1 text-center cursor-pointer'
+                      : tema === 'NEUTRO'
+                      ? 'bg-transparent border border-red-500 text-red-500 font-bold text-xs py-2.5 rounded-lg hover:bg-red-500/10 transition-colors flex-1 text-center cursor-pointer'
+                      : 'bg-transparent border border-zinc-800 text-zinc-500 font-bold text-xs py-2.5 rounded-lg hover:border-zinc-700 transition-colors flex-1 text-center cursor-pointer opacity-50'
                   }
                 >
                   SHORT
@@ -1577,28 +1607,24 @@ export default function NewTradeForm({
               </div>
             </div>
 
-            <div className="flex-1 grid grid-cols-5 gap-4">
-              <div className="col-span-1">
-                <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
-                  Data
-                </label>
+            <div className="flex-1 grid grid-cols-11 gap-3 mb-5">
+              <div className="col-span-3 flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">Data e Hora</label>
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={dataHora}
                   onChange={(e) => setDataHora(e.target.value)}
-                  className="input-padrao focus:outline-none"
+                  className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors [color-scheme:dark] ${focusColor}`}
                   required
                 />
               </div>
 
-              <div className="col-span-1">
-                <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
-                  Instituição
-                </label>
+              <div className="col-span-2 flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">Instituição</label>
                 <select
                   value={exchange}
                   onChange={(e) => handleChangeExchange(e.target.value)}
-                  className="select-padrao cursor-pointer focus:outline-none"
+                  className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors cursor-pointer ${focusColor}`}
                 >
                   {institutions.map((inst) => (
                     <option key={inst.id} value={inst.nome}>
@@ -1622,53 +1648,119 @@ export default function NewTradeForm({
                 </select>
               </div>
 
-              <div className="col-span-1">
-                <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
-                  Ativo
-                </label>
+              <div className="col-span-2 flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">Ativo</label>
                 <input
                   type="text"
                   placeholder="—"
                   value={ativoBase}
                   onChange={(e) => handleChangeAtivoOuPar('ativo', e.target.value)}
-                  className="input-padrao uppercase font-bold focus:outline-none placeholder:text-zinc-600"
+                  className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors uppercase font-bold placeholder:text-zinc-600 ${focusColor}`}
                   required
                 />
               </div>
 
-              <div className="col-span-1">
-                <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
-                  Par
-                </label>
+              <div className="col-span-2 flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">Par</label>
                 <input
                   type="text"
                   placeholder="—"
                   value={ativoCotacao}
                   onChange={(e) => handleChangeAtivoOuPar('par', e.target.value)}
-                  className="input-padrao uppercase font-bold focus:outline-none placeholder:text-zinc-600"
+                  className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors uppercase font-bold placeholder:text-zinc-600 ${focusColor}`}
                   required
                 />
               </div>
 
-              <div className="col-span-1">
-                <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold flex items-center justify-between">
-                  <span>Cotação {ativoBase && ativoCotacao ? `- ${ativoBase.toUpperCase()}/${ativoCotacao.toUpperCase()}` : ''}</span>
+              <div className="col-span-2 flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase flex items-center justify-between">
+                  <span>Cotação</span>
                   {isFetchingPrice && (
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping"></span>
                   )}
                 </label>
-                <div className="relative flex items-center h-[29px]">
-                  <input
-                    type="text"
-                    className="input-padrao-readonly"
-                    value={cotacaoAtual && parseToFloat(cotacaoAtual) > 0
-                      ? formatSmart(parseToFloat(cotacaoAtual))
-                      : '—'}
-                    readOnly
-                    tabIndex={-1}
-                  />
-                </div>
+                <input
+                  type="text"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors cursor-not-allowed opacity-80"
+                  value={cotacaoAtual && parseToFloat(cotacaoAtual) > 0
+                    ? formatSmart(parseToFloat(cotacaoAtual))
+                    : '—'}
+                  readOnly
+                  tabIndex={-1}
+                />
               </div>
+            </div>
+
+            {/* Vínculo com Conta da Corretora (Multi-Conta API) */}
+            {brokerAccounts && brokerAccounts.length > 0 && (
+              <div className="flex items-center justify-between gap-3 p-2.5 bg-zinc-950/70 border border-zinc-800 rounded-lg text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                    Conta da Corretora (API):
+                  </span>
+                  <span className="text-[10px] text-zinc-600 hidden sm:inline">
+                    (Vincular trade a uma subconta específica)
+                  </span>
+                </div>
+                <select
+                  value={contaCorretoraId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setContaCorretoraId(id);
+                    const found = brokerAccounts.find(a => a.id === id);
+                    if (found) {
+                      setContaCorretoraNome(found.nome_conta);
+                      if (found.broker) setExchange(found.broker);
+                    } else {
+                      setContaCorretoraNome('');
+                    }
+                  }}
+                  className="bg-zinc-900 border border-zinc-700 text-zinc-100 rounded px-2.5 py-1 text-xs focus:outline-none focus:border-green-500 cursor-pointer max-w-[280px] truncate"
+                >
+                  <option value="">Lançamento Manual (Sem vínculo de conta)</option>
+                  {brokerAccounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.broker}: {acc.nome_conta} ({acc.tipo_mercado})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* ─── ESTILO DO TRADE ─── */}
+          <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-zinc-850">
+            <label className="text-[10px] text-zinc-500 font-bold uppercase">Estilo do Trade</label>
+            <div className="grid grid-cols-4 gap-2 w-full">
+              {[
+                { id: 'SCALPING', label: 'Scalp', icon: '⚡', desc: '0 a 4h' },
+                { id: 'DAY_TRADE', label: 'Day', icon: '☀️', desc: '4h a 48h' },
+                { id: 'SWING_TRADE', label: 'Swing', icon: '📅', desc: '2 a 30d' },
+                { id: 'POSITION', label: 'Position', icon: '📈', desc: '+30d' },
+              ].map((tipo) => {
+                const isSelected = intencaoTrade === tipo.id;
+                let colorClass = 'bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800'; // Default inactive
+                
+                if (isSelected) {
+                  if (tema === 'LONG') colorClass = 'bg-green-500/10 border-green-500 text-green-400';
+                  else if (tema === 'SHORT') colorClass = 'bg-red-500/10 border-red-500 text-red-400';
+                  else colorClass = 'bg-zinc-700 border-zinc-500 text-white';
+                }
+
+                return (
+                  <button
+                    key={tipo.id}
+                    type="button"
+                    onClick={() => setIntencaoTrade(tipo.id as any)}
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${colorClass}`}
+                  >
+                    <span>{tipo.icon}</span>
+                    <span className="text-xs font-bold">{tipo.label}</span>
+                    <span className={`text-[10px] ${isSelected ? 'opacity-80' : 'text-zinc-500'}`}>{tipo.desc}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1682,22 +1774,20 @@ export default function NewTradeForm({
           
           <div className="grid grid-cols-6 gap-3 w-full mb-4 items-start">
             {/* Cotação Compra */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Cotação Compra
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  className="input-padrao h-full"
-                  type="text"
-                  inputMode="decimal"
-                  value={precoCompra}
-                  placeholder="—"
-                  onChange={(e) => {
-                    handlePrecoCompraChange(e.target.value);
-                  }}
-                />
-              </div>
+              <input
+                className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor}`}
+                type="text"
+                inputMode="decimal"
+                value={precoCompra}
+                placeholder="—"
+                onChange={(e) => {
+                  handleExecucaoChange('cotacaoCompra', e.target.value);
+                }}
+              />
               <span className="text-[10px] font-mono text-zinc-500 mt-1">
                 {resultados.tipoQuote !== 'stable_usd' && precoCompra !== '' && parseToFloat(precoCompra) > 0
                   ? `≈ ${formatSmartPreciso(precoCompra, resultados.tipoQuote)} ${resultados.quote}`
@@ -1706,21 +1796,19 @@ export default function NewTradeForm({
             </div>
 
             {/* Quantidade */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Quantidade
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="—"
-                  value={quantidade}
-                  onChange={(e) => handleQuantidadeChange(e.target.value)}
-                  className="input-padrao h-full"
-                  required
-                />
-              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="—"
+                value={quantidade}
+                onChange={(e) => handleExecucaoChange('quantidade', e.target.value)}
+                className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor}`}
+                required
+              />
               {quantidade && quantidade !== '0' && quantidade !== '0,00' && quantidade !== '0.00' && (
                 <div className="text-[9px] text-zinc-500 mt-1 font-mono leading-tight">
                   <span className="font-semibold text-zinc-300" title={`Preciso: ${formatPreciso(quantidade)}`}>
@@ -1731,18 +1819,18 @@ export default function NewTradeForm({
             </div>
 
             {/* Valor Investido */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Valor Investido
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  readOnly
-                  value={resultados.investidoUSD > 0 ? `$ ${formatSmart(resultados.investidoUSD)}` : '—'}
-                  className="input-padrao h-full cursor-not-allowed"
-                />
-              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="—"
+                value={valorInvestido}
+                onChange={(e) => handleExecucaoChange('valorInvestido', e.target.value)}
+                className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor}`}
+              />
               <div className="flex flex-col mt-1">
                 <span
                   className="text-[10px] font-mono text-zinc-500"
@@ -1750,83 +1838,79 @@ export default function NewTradeForm({
                 >
                   {resultados.tipo !== 'stable_usd' && resultados.investidoQuote > 0
                     ? `≈ ${formatSmart(resultados.investidoQuote)} ${resultados.quote}`
+                    : resultados.investidoUSD > 0
+                    ? `≈ $ ${formatSmart(resultados.investidoUSD)} USD`
                     : ''}
                 </span>
               </div>
             </div>
 
             {/* Moeda Taxa */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Moeda Taxa
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <select
-                  value={moedaTaxa}
-                  onChange={(e) => setMoedaTaxa(e.target.value)}
-                  className="select-padrao h-full cursor-pointer"
-                >
-                  {getMoedaTaxaOptions().map((opt) => (
-                     <option key={opt.value} value={opt.value}>
-                       {opt.label}
-                     </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={moedaTaxa}
+                onChange={(e) => setMoedaTaxa(e.target.value)}
+                className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors cursor-pointer ${focusColor}`}
+              >
+                {getMoedaTaxaOptions().map((opt) => (
+                   <option key={opt.value} value={opt.value}>
+                     {opt.label}
+                   </option>
+                ))}
+              </select>
             </div>
 
             {/* Valor Taxa */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Valor Taxa
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="—"
-                  value={quantidadeTaxa}
-                  onChange={(e) => setQuantidadeTaxa(formatNumberInput(e.target.value))}
-                  className="input-padrao h-full"
-                />
-              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="—"
+                value={quantidadeTaxa}
+                onChange={(e) => setQuantidadeTaxa(formatNumberInput(e.target.value))}
+                className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor}`}
+              />
             </div>
 
             {/* Taxa USD */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Taxa USD
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  value={valorTaxaUSD > 0 ? `$ ${formatSmart(valorTaxaUSD)}` : '—'}
-                  className="input-padrao h-full cursor-not-allowed select-none font-bold"
-                  readOnly
-                  disabled
-                />
-              </div>
+              <input
+                type="text"
+                value={valorTaxaUSD > 0 ? `$ ${formatSmart(valorTaxaUSD)}` : '—'}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-zinc-400 font-mono focus:outline-none transition-colors cursor-not-allowed opacity-80 font-bold"
+                readOnly
+                disabled
+              />
             </div>
           </div>
 
           <div className={`grid gap-3 w-full items-start ${isLeveraged ? 'grid-cols-6' : 'grid-cols-4'}`}>
             {/* Alavancado */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 Alavancado
               </label>
-              <div className="flex items-center gap-1 h-[29px] w-full">
+              <div className="flex gap-2 h-full w-full">
                 <button
                   type="button"
                   onClick={() => setIsLeveraged(true)}
-                  className={`px-2 h-full text-[11px] font-semibold rounded border transition-colors duration-200 flex-1 ${
+                  className={`flex-1 font-bold text-xs py-2.5 rounded-lg border transition-colors duration-200 cursor-pointer text-center ${
                     isLeveraged
                       ? tema === 'LONG'
                         ? 'bg-green-500 text-white border-green-500 hover:bg-green-400'
                         : tema === 'SHORT'
                         ? 'bg-red-500 text-white border-red-500 hover:bg-red-400'
                         : 'bg-zinc-500 text-white border-zinc-500 hover:bg-zinc-400'
-                      : 'bg-[#050507] text-zinc-400 border-zinc-700 hover:border-zinc-500'
+                      : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'
                   }`}
                 >
                   SIM
@@ -1834,14 +1918,14 @@ export default function NewTradeForm({
                 <button
                   type="button"
                   onClick={() => { setIsLeveraged(false); setLeverageMultiplier(''); }}
-                  className={`px-2 h-full text-[11px] font-semibold rounded border transition-colors duration-200 flex-1 ${
+                  className={`flex-1 font-bold text-xs py-2.5 rounded-lg border transition-colors duration-200 cursor-pointer text-center ${
                     !isLeveraged
                       ? tema === 'LONG'
                         ? 'bg-green-500 text-white border-green-500 hover:bg-green-400'
                         : tema === 'SHORT'
                         ? 'bg-red-500 text-white border-red-500 hover:bg-red-400'
                         : 'bg-zinc-500 text-white border-zinc-500 hover:bg-zinc-400'
-                      : 'bg-[#050507] text-zinc-400 border-zinc-700 hover:border-zinc-500'
+                      : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-700'
                   }`}
                 >
                   NÃO
@@ -1852,54 +1936,48 @@ export default function NewTradeForm({
             {isLeveraged && (
               <>
                 {/* Multiplicador */}
-                <div className="flex flex-col">
-                  <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-zinc-500 font-bold uppercase">
                     Multiplicador
                   </label>
-                  <div className="relative flex items-center h-[29px]">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="—"
-                      disabled={!isLeveraged}
-                      value={isLeveraged ? leverageMultiplier : ''}
-                      onChange={(e) => setLeverageMultiplier(formatNumberInput(e.target.value))}
-                      className="input-padrao h-full"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="—"
+                    disabled={!isLeveraged}
+                    value={isLeveraged ? leverageMultiplier : ''}
+                    onChange={(e) => setLeverageMultiplier(formatNumberInput(e.target.value))}
+                    className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor}`}
+                  />
                 </div>
 
                 {/* Total Alavancado */}
-                <div className="flex flex-col">
-                  <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-zinc-500 font-bold uppercase">
                     Total Alavancado
                   </label>
-                  <div className="relative flex items-center h-[29px]">
-                    <input
-                      type="text"
-                      readOnly
-                      disabled={!isLeveraged}
-                      value={isLeveraged && resultados.totalAlavancadoUSD > 0 ? `$ ${formatSmart(resultados.totalAlavancadoUSD)} USD` : '—'}
-                      className="input-padrao h-full cursor-not-allowed select-none text-orange-400 font-bold"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled={!isLeveraged}
+                    value={isLeveraged && resultados.totalAlavancadoUSD > 0 ? `$ ${formatSmart(resultados.totalAlavancadoUSD)} USD` : '—'}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-orange-400 font-mono focus:outline-none transition-colors cursor-not-allowed opacity-80 font-bold"
+                  />
                 </div>
               </>
             )}
 
             {/* VOLUME ESTIMADO */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 VOLUME ESTIMADO
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  readOnly
-                  value={resultados.investidoUSD > 0 ? `$ ${formatSmart(resultados.investidoUSD)}` : '—'}
-                  className="input-padrao h-full cursor-not-allowed font-bold"
-                />
-              </div>
+              <input
+                type="text"
+                readOnly
+                value={resultados.investidoUSD > 0 ? `$ ${formatSmart(resultados.investidoUSD)}` : '—'}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-zinc-400 font-mono focus:outline-none transition-colors cursor-not-allowed opacity-80 font-bold"
+              />
               <span
                 className="text-[10px] font-mono text-zinc-500 mt-1"
                 title={resultados.tipoQuote !== 'stable_usd' ? formatPreciso(resultados.investidoQuote) + ' ' + resultados.quote : ''}
@@ -1911,18 +1989,16 @@ export default function NewTradeForm({
             </div>
 
             {/* VOLUME LÍQUIDO */}
-            <div className="flex flex-col">
-              <label className="block text-zinc-400 text-[9px] uppercase tracking-wider mb-1 font-bold">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase">
                 VOLUME LÍQUIDO
               </label>
-              <div className="relative flex items-center h-[29px]">
-                <input
-                  type="text"
-                  readOnly
-                  value={resultadosLiquido.investidoUSD > 0 ? `$ ${formatSmart(resultadosLiquido.investidoUSD)}` : '—'}
-                  className="input-padrao h-full cursor-not-allowed font-bold"
-                />
-              </div>
+              <input
+                type="text"
+                readOnly
+                value={resultadosLiquido.investidoUSD > 0 ? `$ ${formatSmart(resultadosLiquido.investidoUSD)}` : '—'}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-zinc-400 font-mono focus:outline-none transition-colors cursor-not-allowed opacity-80 font-bold"
+              />
               <span
                 className="text-[10px] font-mono text-zinc-500 mt-1"
                 title={resultadosLiquido.tipoQuote !== 'stable_usd' ? `${formatPreciso(resultadosLiquido.investidoQuote)} ${resultadosLiquido.quote}` : ''}
@@ -1952,8 +2028,8 @@ export default function NewTradeForm({
             <div className="col-span-2 flex flex-col gap-3">
               
               {/* STOP LOSS - linha única ocupando toda a largura */}
-              <div className="flex flex-col">
-                <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">
                   STOP LOSS
                 </label>
                 <input
@@ -1965,7 +2041,7 @@ export default function NewTradeForm({
                     const formatted = formatNumberInput(e.target.value);
                     setStopLoss(formatted);
                   }}
-                  className={`input-padrao ${errors.stopLoss ? 'input-erro' : ''}`}
+                  className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor} ${errors.stopLoss ? 'input-erro border-red-500' : ''}`}
                 />
                 {errors.stopLoss && (
                   <span className="text-[9px] text-red-500 font-mono mt-1 leading-tight">
@@ -1974,12 +2050,12 @@ export default function NewTradeForm({
                 )}
               </div>
 
-              {/* ALVOS - duas linhas */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              {/* ALVOS - três alvos */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase">
                   ALVOS
                 </label>
-                {/* Primeira linha: ALVO 1, 2, 3 */}
+                {/* Linha única: ALVO 1, 2, 3 */}
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { label: 'Alvo 1', value: alvo1, setter: setAlvo1, errorKey: 'alvo1' },
@@ -1999,38 +2075,7 @@ export default function NewTradeForm({
                             const formatted = formatNumberInput(e.target.value);
                             item.setter(formatted);
                           }}
-                          className={`input-padrao h-8 text-xs ${hasError ? 'input-erro' : ''}`}
-                          title={`${item.label}${hasError ? ': ' + errorMessage : ''}`}
-                        />
-                        {hasError && (
-                          <span className="text-[8px] text-red-500 font-mono mt-0.5 leading-tight truncate" title={errorMessage}>
-                            {errorMessage}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Segunda linha: ALVO 4, 5 */}
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: 'Alvo 4', value: alvo4, setter: setAlvo4, errorKey: 'alvo4' },
-                    { label: 'Alvo 5', value: alvo5, setter: setAlvo5, errorKey: 'alvo5' },
-                  ].map((item, index) => {
-                    const hasError = !!errors[item.errorKey as keyof typeof errors];
-                    const errorMessage = errors[item.errorKey as keyof typeof errors];
-                    return (
-                      <div key={index} className="flex flex-col relative group">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder={item.label}
-                          value={item.value || ''}
-                          onChange={(e) => {
-                            const formatted = formatNumberInput(e.target.value);
-                            item.setter(formatted);
-                          }}
-                          className={`input-padrao h-8 text-xs ${hasError ? 'input-erro' : ''}`}
+                          className={`w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-2.5 text-xs text-white font-mono focus:outline-none transition-colors ${focusColor} ${hasError ? 'input-erro border-red-500' : ''}`}
                           title={`${item.label}${hasError ? ': ' + errorMessage : ''}`}
                         />
                         {hasError && (
@@ -2073,184 +2118,240 @@ export default function NewTradeForm({
         </div>
 
         {/* Modal/Popup da Calculadora (B.4 & C.3) */}
-        {showModalRisco && (
-          <div className="modal-overlay">
-            <div className="modal-content">
+        {showModalRisco && (() => {
+          const entrada = parseToFloat(precoCompra);
+          const stopLossNum = parseToFloat(stopLoss);
+          const risco = Math.abs(entrada - stopLossNum); // distância = 1R
+          const direcao = (tipoOperacao || 'LONG').toUpperCase();
+          const riscoMax = parseToFloat(riscoMaximo) > 0 ? parseToFloat(riscoMaximo) : 20;
 
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs uppercase tracking-wider text-zinc-400 font-semibold flex items-center gap-1.5">
-                  <span>🧮</span> Calculadora de Posição & Risco
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowModalRisco(false)}
-                  className="text-zinc-500 hover:text-white text-lg font-bold transition-colors cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
+          // SEÇÃO 3 — STOPS DE REFERÊNCIA CALCULADOS:
+          const distancia = Math.abs(entrada - stopLossNum);
+          let s1 = 0;
+          let s2 = 0;
+          let s3 = stopLossNum; // 100%
+          if (direcao === 'LONG') {
+            s1 = entrada - (distancia * 0.30);
+            s2 = entrada - (distancia * 0.70);
+          } else {
+            s1 = entrada + (distancia * 0.30);
+            s2 = entrada + (distancia * 0.70);
+          }
 
-              {/* Corpo */}
-              <div className="flex flex-col gap-4">
+          // SEÇÃO 5 — RESULTADO:
+          const sugestaoQuantidade = risco > 0 ? riscoMax / risco : 0;
+          const valorPosicao = sugestaoQuantidade * entrada;
+          const pnlStop = direcao === 'LONG' 
+            ? (stopLossNum - entrada) * sugestaoQuantidade 
+            : (entrada - stopLossNum) * sugestaoQuantidade;
 
-                {/* Risco Máximo */}
-                <div className="flex flex-col">
-                  <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
-                    Risco Máx (USD)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="$ 0,00"
-                    value={riscoMaximo}
-                    onChange={(e) => setRiscoMaximo(formatNumberInput(e.target.value))}
-                    className="input-padrao"
-                    autoFocus
-                  />
-                </div>
+          const calcularAlvo = (ent: number, alv: number, sl: number, qty: number, dir: string) => {
+            const riscoUnit = Math.abs(ent - sl);
+            const recompensaUnit = Math.abs(alv - ent);
+            const rr = riscoUnit > 0 ? recompensaUnit / riscoUnit : 0;
+            
+            let pnl;
+            if (dir === 'LONG') {
+              pnl = (alv - ent) * qty;
+            } else {
+              pnl = (ent - alv) * qty;
+            }
+            
+            return { pnl, rr };
+          };
 
-                {/* Parâmetros atuais (só leitura) */}
-                <div className="grid grid-cols-2 gap-3 bg-zinc-950/65 border border-zinc-900 rounded-lg p-3 font-mono">
-                  <div>
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Entrada</span>
-                    <p className="text-white text-xs font-semibold mt-0.5">
-                      $ {precoCompra || '—'}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Stop Loss</span>
-                    <p className="text-red-400 text-xs font-semibold mt-0.5">
-                      $ {stopLoss || '—'}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Diferença</span>
-                    <p className="text-zinc-300 text-xs font-semibold mt-0.5">
-                      {precoCompra && stopLoss
-                        ? `$ ${Math.abs(parseToFloat(precoCompra) - parseToFloat(stopLoss)).toFixed(
-                            (precoCompra.includes(',') ? precoCompra.split(',')[1]?.length : precoCompra.split('.')[1]?.length) || 4
-                          )}`
-                        : '—'}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Direção</span>
-                    <p className={`text-xs font-semibold mt-0.5 ${(tipoOperacao || '').toUpperCase() === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
-                      {tipoOperacao || '—'}
-                    </p>
-                  </div>
-                </div>
+          const labelAtivo = (ativoBase || moeda || 'ATIVO').toUpperCase();
 
-                {/* Seletor de RR (C.3) */}
-                <div className="flex flex-col">
-                  <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
-                    Relação Risco:Recompensa
-                  </label>
-                  <div className="flex gap-1">
-                    {[
-                      { label: '1:1', valor: 1 },
-                      { label: '1:2', valor: 2 },
-                      { label: '1:3', valor: 3 },
-                      { label: '1:5', valor: 5 },
-                    ].map((rr) => (
-                      <button
-                        key={rr.label}
-                        type="button"
-                        className={`flex-1 h-8 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                          rrSelecionado === rr.valor
-                            ? 'bg-violet-600 text-white border border-violet-500'
-                            : 'bg-zinc-850 text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-100'
-                        }`}
-                        onClick={() => {
-                          setRrSelecionado(rr.valor);
-                          const { stopSugerido, alvosSugeridos } = calcularStopEAlvosPorRR(
-                            rr.valor,
-                            parseToFloat(precoCompra),
-                            tipoOperacao
-                          );
-                          if (stopSugerido) {
-                            const pStr = precoCompra || '0';
-                            const splitChar = pStr.includes(',') ? ',' : '.';
-                            const decimalPlaces = pStr.includes(splitChar)
-                              ? pStr.split(splitChar)[1]?.length || 4
-                              : 4;
+          return (
+            <div className="modal-overlay">
+              <div className="modal-content max-w-md w-full max-h-[90vh] overflow-y-auto">
 
-                            setStopLoss(stopSugerido.toFixed(decimalPlaces).replace('.', splitChar));
-                            setAlvo1(alvosSugeridos[0]?.toFixed(decimalPlaces).replace('.', splitChar) || '0');
-                            setAlvo2(alvosSugeridos[1]?.toFixed(decimalPlaces).replace('.', splitChar) || '0');
-                            setAlvo3(alvosSugeridos[2]?.toFixed(decimalPlaces).replace('.', splitChar) || '0');
-                            setAlvo4(alvosSugeridos[3]?.toFixed(decimalPlaces).replace('.', splitChar) || '0');
-                            setAlvo5(alvosSugeridos[4]?.toFixed(decimalPlaces).replace('.', splitChar) || '0');
-                          }
-                        }}
-                      >
-                        {rr.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Resultados */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col">
-                    <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
-                      Sugestão
-                    </label>
-                    <div className="h-10 flex items-center px-3 bg-zinc-850 border border-zinc-700 rounded-lg">
-                      {quantidadeSugerida ? (
-                        <span className="text-green-400 font-mono text-xs font-semibold truncate" title={`${quantidadeSugerida} ${ativoBase}`}>
-                          {quantidadeSugerida.toFixed(quantidadeSugerida < 1 ? 4 : 2)} {ativoBase.toUpperCase()}
-                        </span>
-                      ) : (
-                        <span className="text-zinc-600 font-mono text-sm">—</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col">
-                    <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">
-                      Valor Pos.
-                    </label>
-                    <div className="h-10 flex items-center px-3 bg-zinc-850 border border-zinc-700 rounded-lg">
-                      {valorSugerido ? (
-                        <span className="text-green-400 font-mono text-xs font-semibold truncate">
-                          $ {valorSugerido.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      ) : (
-                        <span className="text-zinc-600 font-mono text-sm">—</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Botões */}
-                <div className="flex gap-2 mt-2">
-                  {quantidadeSugerida ? (
-                    <button
-                      type="button"
-                      className="flex-1 h-10 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                      onClick={() => {
-                        const valueToSet = quantidadeSugerida.toFixed(quantidadeSugerida < 1 ? 6 : 2);
-                        handleQuantidadeChange(valueToSet);
-                        setShowModalRisco(false);
-                      }}
-                    >
-                      APLICAR QUANTIDADE
-                    </button>
-                  ) : null}
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 font-semibold flex items-center gap-1.5">
+                    <span>🧮</span> Calculadora de Posição & Risco
+                  </span>
                   <button
                     type="button"
-                    className="flex-1 h-10 bg-zinc-700 hover:bg-zinc-650 text-zinc-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                     onClick={() => setShowModalRisco(false)}
+                    className="text-zinc-500 hover:text-white text-lg font-bold transition-colors cursor-pointer"
                   >
-                    CANCELAR
+                    ✕
                   </button>
                 </div>
 
+                {/* Corpo */}
+                <div className="flex flex-col gap-4">
+
+                  {/* SEÇÃO 1 — DADOS DE ENTRADA */}
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">
+                      SEÇÃO 1 — DADOS DE ENTRADA (apenas leitura)
+                    </span>
+                    <div className="grid grid-cols-2 gap-3 bg-zinc-950/65 border border-zinc-900 rounded-lg p-3 font-mono">
+                      <div>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">ENTRADA</span>
+                        <p className="text-white text-xs font-semibold mt-0.5">
+                          $ {entrada > 0 ? formatSmart(entrada) : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">STOP LOSS</span>
+                        <p className="text-red-400 text-xs font-semibold mt-0.5">
+                          $ {stopLossNum > 0 ? formatSmart(stopLossNum) : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">DIFERENÇA (1R)</span>
+                        <p className="text-zinc-300 text-xs font-semibold mt-0.5">
+                          $ {risco > 0 ? formatSmart(risco) : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">DIREÇÃO</span>
+                        <p className={`text-xs font-semibold mt-0.5 ${direcao === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                          {direcao}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO 2 — RISCO MÁXIMO */}
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">
+                      SEÇÃO 2 — RISCO MÁXIMO
+                    </span>
+                    <div className="flex flex-col">
+                      <label className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1 block">
+                        RISCO MÁX (USD)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="20"
+                        value={riscoMaximo}
+                        onChange={(e) => setRiscoMaximo(formatNumberInput(e.target.value))}
+                        className={`input-padrao focus:outline-none transition-colors ${focusColor}`}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO 3 — STOPS DE REFERÊNCIA CALCULADOS */}
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">
+                      SEÇÃO 3 — STOPS DE REFERÊNCIA CALCULADOS
+                    </span>
+                    <div className="grid grid-cols-3 gap-2 bg-zinc-950/65 border border-zinc-900 rounded-lg p-3 font-mono">
+                      <div className="bg-zinc-900/40 p-1.5 rounded border border-zinc-800/60">
+                        <span className="text-[8px] text-zinc-400 uppercase font-bold block">S1 (30%)</span>
+                        <span className="text-white text-[11px] font-bold">
+                          $ {s1 > 0 ? s1.toFixed(4) : '—'}
+                        </span>
+                      </div>
+                      <div className="bg-zinc-900/40 p-1.5 rounded border border-zinc-800/60">
+                        <span className="text-[8px] text-zinc-400 uppercase font-bold block">S2 (70%)</span>
+                        <span className="text-white text-[11px] font-bold">
+                          $ {s2 > 0 ? s2.toFixed(4) : '—'}
+                        </span>
+                      </div>
+                      <div className="bg-zinc-900/40 p-1.5 rounded border border-zinc-800/60">
+                        <span className="text-[8px] text-zinc-400 uppercase font-bold block">S3 (STOP)</span>
+                        <span className="text-red-400 text-[11px] font-bold">
+                          $ {s3 > 0 ? s3.toFixed(4) : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO 4 — ALVOS */}
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">
+                      SEÇÃO 4 — ALVOS (com PNL e R:R)
+                    </span>
+                    <div className="flex flex-col gap-2 bg-zinc-950/65 border border-zinc-900 rounded-lg p-3 font-mono">
+                      {[alvo1, alvo2, alvo3].map((alvoStr, idx) => {
+                        const val = parseToFloat(alvoStr);
+                        if (val <= 0) {
+                          return (
+                            <div key={idx} className="flex justify-between items-center text-xs text-zinc-600 border-b border-zinc-900/40 pb-1.5 last:border-b-0 last:pb-0">
+                              <span>Alvo {idx + 1}: —</span>
+                              <span>Sem alvo definido</span>
+                            </div>
+                          );
+                        }
+                        const { pnl, rr } = calcularAlvo(entrada, val, stopLossNum, sugestaoQuantidade, direcao);
+                        return (
+                          <div key={idx} className="flex justify-between items-center text-xs border-b border-zinc-900/40 pb-1.5 last:border-b-0 last:pb-0 font-mono">
+                            <div>
+                              <span className="text-zinc-400 font-bold">Alvo {idx + 1}:</span>{' '}
+                              <span className="text-white font-semibold">$ {formatSmart(val)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-emerald-400 font-bold block">+{pnl.toFixed(2)} USD</span>
+                              <span className="text-zinc-500 text-[10px]">R:R: {rr.toFixed(2)}:1</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO 5 — RESULTADO */}
+                  <div>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold block mb-1">
+                      SEÇÃO 5 — RESULTADO
+                    </span>
+                    <div className="flex flex-col gap-2 bg-zinc-950/65 border border-zinc-900 rounded-lg p-3 font-mono text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-zinc-400 uppercase font-semibold">SUGESTÃO:</span>
+                        <span className="text-green-400 font-bold">
+                          {sugestaoQuantidade > 0 ? `${sugestaoQuantidade.toFixed(2)} ${labelAtivo}` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-zinc-400 uppercase font-semibold">VALOR POS.:</span>
+                        <span className="text-green-400 font-bold">
+                          {valorPosicao > 0 ? `$ ${valorPosicao.toFixed(2)}` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-zinc-400 uppercase font-semibold">RISCO TOTAL (Stop):</span>
+                        <span className={`font-bold ${pnlStop < 0 ? 'text-red-400' : 'text-zinc-400'}`}>
+                          {pnlStop !== 0 ? `$ ${pnlStop.toFixed(2)}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO 6 — BOTÕES */}
+                  <div className="flex gap-2 mt-2">
+                    {sugestaoQuantidade > 0 ? (
+                      <button
+                        type="button"
+                        className="flex-1 h-10 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                        onClick={() => {
+                          const valueToSet = sugestaoQuantidade.toFixed(sugestaoQuantidade < 1 ? 6 : 2);
+                          handleExecucaoChange('quantidade', valueToSet);
+                          setShowModalRisco(false);
+                        }}
+                      >
+                        APLICAR QUANTIDADE
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="flex-1 h-10 bg-zinc-700 hover:bg-zinc-650 text-zinc-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                      onClick={() => setShowModalRisco(false)}
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* BLOCO D: Diário do Trade (Compacto Card e Modal) */}
         <div className={`rounded-lg border p-4 ${

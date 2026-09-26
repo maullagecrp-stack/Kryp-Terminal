@@ -23,6 +23,8 @@ import {
   Layers2,
   FileCheck2,
   Building2,
+  Link2,
+  KeyRound,
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
 import DBBlueprint from './components/DBBlueprint';
@@ -32,66 +34,68 @@ import MarketSimulator from './components/MarketSimulator';
 import CSVImporter from './components/CSVImporter';
 import DashboardView from './components/DashboardView';
 import TradeDeskView from './components/TradeDeskView';
-import { Trade, CoinPrice, TradeStatus, Instituicao, InstituicaoTipo, Hold } from './types';
+import BrokerConnectionsView from './components/BrokerConnectionsView';
+import { Trade, CoinPrice, TradeStatus, Instituicao, InstituicaoTipo, Hold, BrokerAccount } from './types';
 import { initialCoinPrices, initialTrades, initialInstitutions } from './data/mockData';
+import { getLocalBrokerAccounts, saveLocalBrokerAccounts } from './actions/brokerAccounts';
 import HoldDeskView from './components/HoldDeskView';
 import NewHoldForm from './components/NewHoldForm';
 import { Briefcase } from 'lucide-react';
 import { updateTrade } from './actions/trades';
 
-const initialHolds: Hold[] = [
-  {
-    id: 'hold-btc-1',
-    data_hora: '2026-06-12T10:00:00Z',
-    exchange: 'Binance',
-    moeda: 'BTC',
-    tipo: 'Compra',
-    preco_compra: 63500,
-    quantidade: 0.25,
-    valor_investido: 15875,
-    alvo_1: 85000,
-    alvo_2: 100000,
-    alvo_3: 120000,
-    notas: 'Acumulação estratégica de Bitcoin spot com tese sólida de reserva de valor soberana a longo prazo.',
-    created_at: '2026-06-12T10:00:00Z'
-  },
-  {
-    id: 'hold-eth-1',
-    data_hora: '2026-06-11T14:30:00Z',
-    exchange: 'MetaMask',
-    moeda: 'ETH',
-    tipo: 'Compra',
-    preco_compra: 3250,
-    quantidade: 2.0,
-    valor_investido: 6500,
-    alvo_1: 5000,
-    alvo_2: 8000,
-    alvo_3: 10000,
-    notas: 'ETH colateral spot e utilidade de rede dApps Ethereum L2. Visão de longo prazo.',
-    created_at: '2026-06-11T14:30:00Z'
-  },
-  {
-    id: 'hold-sol-1',
-    data_hora: '2026-06-13T09:15:00Z',
-    exchange: 'Bybit',
-    moeda: 'SOL',
-    tipo: 'Compra',
-    preco_compra: 130,
-    quantidade: 25.0,
-    valor_investido: 3250,
-    alvo_1: 250,
-    alvo_2: 400,
-    alvo_3: 500,
-    notas: 'Velocidade e liquidez DeFi de alta performance. Carregamento de portfólio no ciclo altista.',
-    created_at: '2026-06-13T09:15:00Z'
-  }
-];
+import { supabase } from './lib/supabase';
+
+const initialHolds: Hold[] = [];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'trades' | 'blueprint' | 'instituicoes' | 'new-trade' | 'hold' | 'new-hold'>('dashboard');
-  const [trades, setTrades] = useState<Trade[]>(initialTrades);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'trades' | 'conexoes-api' | 'blueprint' | 'instituicoes' | 'new-trade' | 'hold' | 'new-hold'>('dashboard');
+  const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccount[]>(() => getLocalBrokerAccounts());
+
+  useEffect(() => {
+    saveLocalBrokerAccounts(brokerAccounts);
+  }, [brokerAccounts]);
+
+  const [trades, setTrades] = useState<Trade[]>(() => {
+    if (typeof window !== 'undefined') {
+      const savedTrades = localStorage.getItem('@kryp-terminal:trades');
+      if (savedTrades) {
+        try {
+          const parsed = JSON.parse(savedTrades);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // Remove dados fictícios de exemplo
+            return parsed.filter((t: any) => t && !String(t.id).startsWith('mock-'));
+          }
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('@kryp-terminal:trades', JSON.stringify(trades));
+  }, [trades]);
+
+  const [holds, setHolds] = useState<Hold[]>(() => {
+    if (typeof window !== 'undefined') {
+      const savedHolds = localStorage.getItem('@kryp-terminal:holds');
+      if (savedHolds) {
+        try {
+          const parsed = JSON.parse(savedHolds);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // Remove dados fictícios de exemplo
+            return parsed.filter((h: any) => h && !String(h.id).startsWith('hold-'));
+          }
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('@kryp-terminal:holds', JSON.stringify(holds));
+  }, [holds]);
+
   const [tradeToEdit, setTradeToEdit] = useState<Trade | null>(null);
-  const [holds, setHolds] = useState<Hold[]>(initialHolds);
   const [coinPrices, setCoinPrices] = useState<CoinPrice[]>(initialCoinPrices);
   const [institutions, setInstitutions] = useState<Instituicao[]>(initialInstitutions);
   const [tickerFilter, setTickerFilter] = useState('');
@@ -99,6 +103,47 @@ export default function App() {
   const [simulatedActivePnL, setSimulatedActivePnL] = useState<number>(0);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isCsvImportOpen, setIsCsvImportOpen] = useState<boolean>(false);
+  const [saldoBanca, setSaldoBanca] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('@kryp-terminal:saldo_banca');
+      if (saved !== null) {
+        const val = parseFloat(saved);
+        if (!isNaN(val)) return val;
+      }
+    }
+    return 0.00;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('@kryp-terminal:saldo_banca', String(saldoBanca));
+  }, [saldoBanca]);
+
+  // Função para zerar todos os dados fictícios e bancos de dados
+  const handleResetAllData = async () => {
+    if (confirm('ATENÇÃO: Deseja apagar TODOS os dados e zerar completamente o terminal (trades, aportes, contas de corretoras e saldo)?')) {
+      setTrades([]);
+      setHolds([]);
+      setBrokerAccounts([]);
+      setSaldoBanca(0.00);
+
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('@kryp-terminal:trades');
+        localStorage.removeItem('@kryp-terminal:holds');
+        localStorage.removeItem('@kryp-terminal:broker_accounts');
+        localStorage.removeItem('@kryp-terminal:saldo_banca');
+      }
+
+      try {
+        await supabase.from('trades').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('holds').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('broker_accounts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (e) {
+        // Safe offline catch
+      }
+
+      showNotification('Todos os dados foram excluídos e os bancos de dados foram zerados com sucesso!', 'success');
+    }
+  };
 
   // Adiciona instituição
   const handleAddInstitution = (newInst: { nome: string; tipo: InstituicaoTipo; cor_hex: string; native_coin?: string }) => {
@@ -727,6 +772,24 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('conexoes-api')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded text-xs font-mono transition-all text-left cursor-pointer ${
+              activeTab === 'conexoes-api'
+                ? 'bg-zinc-800 text-white font-bold'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+            }`}
+            id="sidebar-btn-conexoes-api"
+          >
+            <div className="flex items-center gap-3">
+              <Link2 className="w-4 h-4 shrink-0 text-green-400" />
+              Conexões API
+            </div>
+            <span className="bg-zinc-900 border border-zinc-700 text-green-400 text-[10px] px-1.5 py-0.5 rounded font-bold font-mono">
+              {brokerAccounts.length}
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('hold')}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded text-xs font-mono transition-all text-left cursor-pointer ${
               activeTab === 'hold'
@@ -813,6 +876,15 @@ export default function App() {
           >
             Baixar Template
           </button>
+          <button
+            onClick={handleResetAllData}
+            className="w-full border border-red-900/60 hover:border-red-600 bg-red-950/20 hover:bg-red-950/40 text-red-400 hover:text-red-300 py-1.5 rounded text-[10px] transition-colors font-mono cursor-pointer flex items-center justify-center gap-1.5 font-bold"
+            id="sidebar-btn-reset-all"
+            title="Apaga todos os dados e zera o banco de dados para iniciar com dados reais"
+          >
+            <Trash2 className="w-3 h-3 text-red-400" />
+            Zerar Banco de Dados
+          </button>
         </div>
       </aside>
 
@@ -845,12 +917,31 @@ export default function App() {
             <div className="space-y-6">
               <NewTradeForm
                 institutions={institutions}
+                brokerAccounts={brokerAccounts}
                 onSubmitTrade={handleRegisterDetailedTrade}
                 onCancel={() => {
                   setActiveTab('trades');
                   setTradeToEdit(null);
                 }}
                 tradeToEdit={tradeToEdit}
+                saldoBanca={saldoBanca}
+              />
+            </div>
+          ) : activeTab === 'conexoes-api' ? (
+            /* CONEXÕES COM CORRETORAS VIA API (MULTI-CONTAS POR CORRETORA) */
+            <div className="space-y-6">
+              <BrokerConnectionsView
+                accounts={brokerAccounts}
+                setAccounts={setBrokerAccounts}
+                coinPrices={coinPrices}
+                institutions={institutions}
+                onAddInstitution={handleAddInstitution}
+                onImportTrades={(importedTrades) => {
+                  setTrades(prev => [...importedTrades, ...prev]);
+                  setActiveTab('trades');
+                  showNotification(`${importedTrades.length} operações importadas da corretora para o Trade Desk com sucesso!`, 'success');
+                }}
+                showNotification={showNotification}
               />
             </div>
           ) : activeTab === 'trades' ? (
@@ -861,6 +952,8 @@ export default function App() {
               coinPrices={coinPrices}
               setCoinPrices={setCoinPrices}
               institutions={institutions}
+              brokerAccounts={brokerAccounts}
+              onNavigateToBrokerConnections={() => setActiveTab('conexoes-api')}
               onDeleteTrade={handleDeleteTrade}
               onRegisterDetailedTrade={handleRegisterDetailedTrade}
               onEditTrade={(trade) => {
@@ -875,6 +968,9 @@ export default function App() {
               setSimulatedActivePnL={setSimulatedActivePnL}
               downloadCsvTemplate={downloadCsvTemplate}
               onLaunchTradeClick={() => setActiveTab('new-trade')}
+              saldoBanca={saldoBanca}
+              setSaldoBanca={setSaldoBanca}
+              onResetAllData={handleResetAllData}
             />
           ) : activeTab === 'hold' ? (
             <div className="space-y-6">
@@ -883,6 +979,7 @@ export default function App() {
                 setHolds={setHolds}
                 coinPrices={coinPrices}
                 institutions={institutions}
+                brokerAccounts={brokerAccounts}
                 onLaunchHoldClick={() => setActiveTab('new-hold')}
                 showNotification={showNotification}
               />
@@ -891,6 +988,7 @@ export default function App() {
             <div className="space-y-6">
               <NewHoldForm
                 institutions={institutions}
+                brokerAccounts={brokerAccounts}
                 onSubmitHold={handleRegisterDetailedHold}
                 onCancel={() => setActiveTab('hold')}
               />
